@@ -1,0 +1,4 @@
+provider: generic
+url: https://desktop-f96376.gitlab.io/
+channel: latest
+updaterCacheDirName: novaq-desktop-updater

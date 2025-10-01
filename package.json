@@ -1,0 +1,155 @@
+{
+  "name": "novaq-desktop",
+  "version": "1.0.4",
+  "description": "NovaQ Desktop",
+  "main": "src/main.js",
+  "scripts": {
+    "kill-3201": "bash -lc 'pids=$(lsof -ti:3201 || true); if [ -n \"$pids\" ]; then echo \"Killing processes on 3201: $pids\"; kill -9 $pids || true; fi'",
+    "start": "cross-env NODE_ENV=production APP_VERSION=1.0.4 electron .",
+    "start:prod": "cross-env NODE_ENV=production APP_VERSION=1.0.4 electron .",
+    "dev": "cross-env NODE_ENV=development APP_VERSION=1.0.4 electron . --dev --no-asar",
+    "webpack:dev": "node dev-server.js",
+    "webpack:build": "cross-env NODE_ENV=development webpack --mode development",
+    "webpack:build:prod": "npm run build:updater && cross-env NODE_ENV=production APP_VERSION=1.0.4 webpack --mode production",
+    "react-start": "webpack serve --mode development --open",
+    "build": "webpack --mode production",
+    "dev:live": "concurrently \"npm run webpack:dev\" \"wait-on http://localhost:3201/bundle.js && npm run dev\"",
+    "release": "./scripts/release.sh",
+    "dist": "electron-builder",
+    "build:win": "npm run webpack:build:prod && npm run build:updater && electron-builder --win zip",
+    "build:portable": "npm run webpack:build:prod && npm run build:updater && electron-builder --win zip && npm run clean:portable",
+    "clean:portable": "node scripts/clean-portable.js",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps",
+    "update-server": "node update-server.js",
+    "build:release": "./scripts/build-release.sh",
+    "build:updater": "nexe updater.js --target windows-x86-14.15.3 --output updater-32.exe",
+    "build:updater:32": "nexe updater.js --target windows-x86-14.15.3 --output updater-32.exe",
+    "build:updater:64": "nexe updater.js --target windows-x64-14.15.3 --output updater-x64.exe",
+    "build:updater:both": "npm run build:updater:32 && npm run build:updater:64"
+  },
+  "dependencies": {
+    "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.1",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.6.2",
+    "node-fetch": "^2.7.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io-client": "^4.8.1",
+    "stream-browserify": "^3.0.0",
+    "util": "^0.12.5"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.3",
+    "@babel/preset-env": "^7.28.3",
+    "@babel/preset-react": "^7.27.1",
+    "adm-zip": "^0.5.16",
+    "babel-loader": "^10.0.0",
+    "concurrently": "^9.2.1",
+    "copy-webpack-plugin": "^13.0.1",
+    "cross-env": "^10.0.0",
+    "css-loader": "^7.1.2",
+    "electron": "22.3.27",
+    "electron-builder": "^24.0.0",
+    "express": "^4.18.2",
+    "html-webpack-plugin": "^5.6.4",
+    "nexe": "^5.0.0-beta.4",
+    "pkg": "^5.8.1",
+    "process": "^0.11.10",
+    "style-loader": "^4.0.0",
+    "wait-on": "^8.0.4",
+    "webpack": "^5.101.3",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
+  },
+  "build": {
+    "appId": "com.novaq.desktop",
+    "productName": "NovaQ Desktop",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "package.json",
+      "updater-32.exe"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://desktop-f96376.gitlab.io/"
+      }
+    ],
+    "artifactName": "NovaQ-Portable-${version}.${ext}",
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "ia32"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "ia32"
+          ]
+        }
+      ],
+      "icon": "assets/Logo.ico",
+      "publisherName": "Nova Team",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NovaQ Desktop",
+      "installerIcon": "assets/Logo.ico",
+      "uninstallerIcon": "assets/Logo.ico",
+      "installerHeaderIcon": "assets/Logo.ico",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "artifactName": "NovaQ_Desk.${ext}"
+    },
+    "extraResources": [
+      {
+        "from": "assets/",
+        "to": "assets/"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "updater-32.exe",
+        "to": "updater-32.exe"
+      }
+    ],
+    "compression": "maximum",
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/Logopng.png",
+      "identity": null,
+      "category": "public.app-category.finance"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/Logopng.png"
+    }
+  },
+  "keywords": [
+    "electron",
+    "desktop",
+    "novaq",
+    "finance",
+    "banking"
+  ],
+  "author": "Nova Team",
+  "license": "MIT"
+}

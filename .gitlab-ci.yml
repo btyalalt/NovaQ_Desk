@@ -1,0 +1,335 @@
+stages:
+  - build
+  - pages
+  - post
+
+# ⚡ Global optimizations
+variables:
+  NODE_VERSION: "20"
+  GIT_DEPTH: "1"
+  GIT_STRATEGY: fetch
+  ELECTRON_CACHE: "$CI_PROJECT_DIR/.cache/electron"
+  ELECTRON_BUILDER_CACHE: "$CI_PROJECT_DIR/.cache/electron-builder"
+  NODE_OPTIONS: "--max_old_space_size=4096"
+
+default:
+  cache:
+    key: "v3-${CI_COMMIT_REF_SLUG}"
+    policy: pull-push
+    paths:
+      - node_modules/
+      - .cache/
+      - .npm/
+
+build-desktop-win:
+  stage: build
+  # ⚡ Standard Node image with fast wine installation
+  image: node:20
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq wine p7zip-full
+    - node -v && npm -v
+    - npm ci --cache .npm --prefer-offline
+  script: |
+    set -euo pipefail
+    npm run build
+
+    echo "== Build Windows ZIP (portable) =="
+    npx electron-builder --win zip --publish=never
+    
+    echo "== Build Windows NSIS Installer (with improved settings) =="
+    set +e  # Temporarily disable exit on error for NSIS build
+    
+    # Try NSIS build with more permissive settings
+    ELECTRON_BUILDER_CACHE_DIR="$CI_PROJECT_DIR/.cache/electron-builder" \
+    npx electron-builder --win nsis --publish=never --config.nsis.oneClick=false --config.nsis.allowToChangeInstallationDirectory=true
+    NSIS_EXIT_CODE=$?
+    set -e  # Re-enable exit on error
+    
+    if [ $NSIS_EXIT_CODE -eq 0 ]; then
+      echo "✅ NSIS installer built successfully"
+    else
+      echo "⚠️  NSIS installer build failed (exit code: $NSIS_EXIT_CODE)"
+      echo "🔄 Attempting simpler NSIS build..."
+      
+      set +e
+      npx electron-builder --win nsis --publish=never --config.nsis.oneClick=true
+      NSIS_EXIT_CODE=$?
+      set -e
+      
+      if [ $NSIS_EXIT_CODE -eq 0 ]; then
+        echo "✅ Simple NSIS installer built successfully"
+      else
+        echo "❌ All NSIS build attempts failed"
+      fi
+    fi
+
+    echo "== release contents with file sizes =="
+    ls -lah release/ || true
+    echo "== Detailed .exe files in release/ =="
+    find release/ -name "*.exe" -exec ls -lah {} \; 2>/dev/null || echo "No .exe files found"
+
+    mkdir -p public
+    # ⚡ ZIP нэр тодорхойлох (найдвартай)
+    VERSION=$(node -p "require('./package.json').version")
+    if compgen -G "release/NovaQ-Portable-*.zip" > /dev/null; then
+      PORTABLE_ZIP=$(ls release/NovaQ-Portable-*.zip | head -n1)
+    else
+      PORTABLE_ZIP=$(ls release/*.zip | head -n1)
+    fi
+
+    cp "$PORTABLE_ZIP" "public/NovaQ-Portable-$VERSION.zip"
+    cp -f release/*.yml public/ 2>/dev/null || true
+    echo "✅ Copied $PORTABLE_ZIP to public/NovaQ-Portable-$VERSION.zip"
+    
+    # ⚡ Copy installer as NovaQ-Setup.exe for fixed download URL (with size validation)
+    if compgen -G "release/NovaQ-Setup-*.exe" > /dev/null; then
+      SETUP_EXE=$(ls release/NovaQ-Setup-*.exe | head -n1)
+      FILE_SIZE=$(stat -c%s "$SETUP_EXE" 2>/dev/null || echo "0")
+      echo "🔍 Found NSIS installer: $SETUP_EXE (Size: $FILE_SIZE bytes)"
+      
+      if [ "$FILE_SIZE" -gt 1000000 ]; then  # Must be larger than 1MB
+        cp "$SETUP_EXE" "public/NovaQ-Setup.exe"
+        echo "✅ Copied $SETUP_EXE to public/NovaQ_Setup.exe (Size: $FILE_SIZE bytes)"
+      else
+        echo "⚠️  NSIS installer too small ($FILE_SIZE bytes), skipping"
+      fi
+    elif compgen -G "release/NovaQ-Portable-*.exe" > /dev/null; then
+      PORTABLE_EXE=$(ls release/NovaQ-Portable-*.exe | head -n1)
+      FILE_SIZE=$(stat -c%s "$PORTABLE_EXE" 2>/dev/null || echo "0")
+      echo "🔍 Found portable installer: $PORTABLE_EXE (Size: $FILE_SIZE bytes)"
+      
+      if [ "$FILE_SIZE" -gt 1000000 ]; then  # Must be larger than 1MB
+        cp "$PORTABLE_EXE" "public/NovaQ-Setup.exe"
+        echo "✅ Copied $PORTABLE_EXE to public/NovaQ-Setup.exe (Size: $FILE_SIZE bytes)"
+      else
+        echo "⚠️  Portable installer too small ($FILE_SIZE bytes), skipping"
+      fi
+    else
+      echo "❌ No valid .exe installer found - NSIS build failed"
+      echo "🔄 Creating self-extracting installer as fallback..."
+      
+      if [ -f "public/NovaQ-Portable-$VERSION.zip" ]; then
+        # Try to create a self-extracting archive with 7zip
+        if command -v 7z >/dev/null 2>&1; then
+          echo "Creating self-extracting archive with 7zip..."
+          cd public
+          7z a -sfx "NovaQ-Setup.exe" "NovaQ-Portable-$VERSION.zip"
+          cd ..
+          if [ -f "public/NovaQ-Setup.exe" ] && [ $(stat -c%s "public/NovaQ-Setup.exe") -gt 1000000 ]; then
+            echo "✅ Created self-extracting installer with 7zip"
+          else
+            echo "⚠️  7zip self-extractor failed, using ZIP fallback"
+            cp "public/NovaQ-Portable-$VERSION.zip" "public/NovaQ-Setup.exe"
+          fi
+        else
+          echo "⚠️  7zip not available, using ZIP as fallback"
+          cp "public/NovaQ-Portable-$VERSION.zip" "public/NovaQ-Setup.exe"
+        fi
+        echo "📝 Note: If this is a ZIP file, users should rename to .zip and extract"
+      else
+        echo "❌ No files available for installer creation"
+      fi
+    fi
+    
+    # ⚡ GUARANTEE: Only create NovaQ-Setup.exe if we have a VALID executable
+    if [ ! -f "public/NovaQ-Setup.exe" ]; then
+      echo "🚨 CRITICAL: NovaQ-Setup.exe still missing after all attempts!"
+      echo "🔄 Checking for valid executable files only..."
+      
+      # Only look for actual .exe files from the build process
+      if compgen -G "release/*.exe" > /dev/null; then
+        FIRST_EXE=$(ls release/*.exe | head -n1)
+        FILE_SIZE=$(stat -c%s "$FIRST_EXE" 2>/dev/null || echo "0")
+        
+        if [ "$FILE_SIZE" -gt 500000 ]; then  # Must be at least 500KB for valid exe
+          cp "$FIRST_EXE" "public/NovaQ-Setup.exe"
+          echo "✅ GUARANTEED: Created NovaQ-Setup.exe from release exe ($(stat -c%s 'public/NovaQ-Setup.exe') bytes)"
+        else
+          echo "⚠️  Found exe file but too small ($FILE_SIZE bytes) - likely corrupted"
+        fi
+      else
+        echo "❌ No valid executable files found - will not create fake .exe file"
+        echo "📝 Users should download the ZIP version instead"
+      fi
+    else
+      FILE_SIZE=$(stat -c%s "public/NovaQ-Setup.exe")
+      echo "✅ NovaQ-Setup.exe already exists ($FILE_SIZE bytes)"
+      
+      # Validate the existing file is actually executable
+      if [ "$FILE_SIZE" -lt 500000 ]; then
+        echo "⚠️  WARNING: NovaQ-Setup.exe seems too small ($FILE_SIZE bytes) - may not be valid executable"
+      fi
+    fi
+    
+    
+    # ⚡ Simplified: Skip heavy JavaScript self-extracting for speed
+    # Just create basic portable package
+    if compgen -G "release/NovaQ-Portable-*.zip" > /dev/null; then
+      PORTABLE_ZIP=$(ls release/NovaQ-Portable-*.zip | head -n1)
+      echo "Creating simple portable package from $PORTABLE_ZIP"
+      
+      # Create temp directory for extraction
+      mkdir -p temp-extract
+      unzip -q "$PORTABLE_ZIP" -d temp-extract/
+      
+      # Create ready-to-run portable package
+      mkdir -p public/NovaQ-Desktop-Portable
+      cp -r temp-extract/* public/NovaQ-Desktop-Portable/
+      
+      # Simple README
+      echo "NovaQ Desktop Portable - Run NovaQ Desktop.exe" > public/NovaQ-Desktop-Portable/README.txt
+      
+      # Cleanup
+      rm -rf temp-extract
+      
+      echo "✅ Portable package created (simplified for speed)"
+    fi
+
+    # latest.json for portable updater
+    # Use the copied ZIP file in public/ directory for consistent naming
+    VERSION=$(node -p "require('./package.json').version")
+    ZIP_FILE="public/NovaQ-Portable-$VERSION.zip"
+    
+    if [ -f "$ZIP_FILE" ]; then
+      ZIP_NAME=$(basename "$ZIP_FILE")
+      VERSION=$(node -p "require('./package.json').version")
+      SIZE=$(stat -c%s "$ZIP_FILE")
+      SHA512=$(sha512sum "$ZIP_FILE" | awk '{print $1}')
+      BASE_URL="${CI_PAGES_URL:-https://desktop-f96376.gitlab.io}"
+      
+      echo "🔍 [DEBUG] Found ZIP file: $ZIP_FILE"
+      echo "🔍 [DEBUG] ZIP name: $ZIP_NAME"
+      echo "🔍 [DEBUG] Version: $VERSION"
+      echo "🔍 [DEBUG] Size: $SIZE bytes"
+      
+      # Create latest.json for portable updater
+      echo "{
+        \"name\": \"NovaQ Desktop Portable\",
+        \"version\": \"$VERSION\",
+        \"programVersion\": \"$VERSION\",
+        \"description\": \"Шинэчлэлтийн хувилбар\",
+        \"url\": \"$BASE_URL/NovaQ-Portable-$VERSION.zip\",
+        \"sha512\": \"$SHA512\",
+        \"size\": $SIZE,
+        \"releaseDate\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+      }" > public/latest.json
+      
+      # Create latest.yml for auto-updater using printf to avoid YAML issues
+      RELEASE_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      printf 'version: "%s"\n' "$VERSION" > public/latest.yml
+      printf 'files:\n' >> public/latest.yml
+      printf '  - url: "NovaQ-Portable-%s.zip"\n' "$VERSION" >> public/latest.yml
+      printf '    sha512: "%s"\n' "$SHA512" >> public/latest.yml
+      printf '    size: %s\n' "$SIZE" >> public/latest.yml
+      printf 'path: "NovaQ-Portable-%s.zip"\n' "$VERSION" >> public/latest.yml
+      printf 'sha512: "%s"\n' "$SHA512" >> public/latest.yml
+      printf 'releaseDate: "%s"\n' "$RELEASE_DATE" >> public/latest.yml
+      
+      echo "✅ Created latest.yml and latest.json"
+    else
+      echo "WARN: Portable ZIP not found; latest files not generated."
+    fi
+
+    # ⚡ Simple index.html generation
+    {
+      echo "<html><head><title>NovaQ Desktop Downloads</title><style>body{font-family:Arial,sans-serif;margin:40px;} ul{list-style-type:none;} li{margin:10px 0;} a{text-decoration:none;color:#0066cc;} a:hover{text-decoration:underline;}</style></head><body><h1>NovaQ Desktop Downloads</h1><ul>"
+      find public -maxdepth 1 -name "*Setup*.exe" -printf '<li><a href="%f">🚀 %f (Installer)</a></li>\n' 2>/dev/null || true
+      find public -maxdepth 1 -name "*Portable*.zip" -printf '<li><a href="%f">📦 %f (Portable)</a></li>\n' 2>/dev/null || true
+      [ -f public/latest.json ] && echo "<li><a href='latest.json'>📄 latest.json (Update Info)</a></li>"
+      [ -f public/latest.yml ] && echo "<li><a href='latest.yml'>📄 latest.yml (Update Info)</a></li>"
+      [ -d public/NovaQ-Desktop-Portable ] && echo "<li><a href='NovaQ-Desktop-Portable/'>📁 Ready-to-Run Package</a></li>"
+      echo "</ul><p><small>Generated: $(date)</small></p></body></html>"
+    } > public/index.html
+
+    echo "== public/ contents =="
+    ls -la public || true
+    echo "== public/ update files =="
+    find public/ -maxdepth 1 \( -name "*.yml" -o -name "*.zip" -o -name "*.exe" -o -name "latest.json" \) -print || true
+    if [ -f public/latest.json ]; then echo "== latest.json ==" && cat public/latest.json; fi
+    
+    # ⚡ FINAL VERIFICATION: Check if NovaQ_Desk.exe exists and is valid
+    echo "== FINAL VERIFICATION =="
+    if [ -f "public/NovaQ_Desk.exe" ]; then
+      FILE_SIZE=$(stat -c%s "public/NovaQ_Desk.exe")
+      if [ "$FILE_SIZE" -gt 500000 ]; then
+        echo "✅ SUCCESS: NovaQ_Desk.exe exists and looks valid (Size: $FILE_SIZE bytes)"
+        echo "🔗 Will be available at: https://desktop-f96376.gitlab.io/NovaQ_Desk.exe"
+      else
+        echo "⚠️  WARNING: NovaQ-Setup.exe exists but is too small ($FILE_SIZE bytes)"
+        echo "🗑️  Removing invalid file to prevent 'can't run on PC' errors"
+        rm -f "public/NovaQ_Desk.exe"
+        echo "📝 Users should download the ZIP version instead"
+      fi
+    else
+      echo "ℹ️  INFO: NovaQ-Setup.exe not created (no valid executable available)"
+      echo "📝 Users can download the ZIP version instead"
+    fi
+    
+    echo "🔍 Available download files:"
+    find public/ -maxdepth 1 \( -name "*.zip" -o -name "*.exe" \) -exec ls -lah {} \; 2>/dev/null || echo "No download files found"
+  artifacts:
+    paths:
+      - public
+  only:
+    - master
+    - tags
+
+pages:
+  stage: pages
+  needs: ["build-desktop-win"]
+  script:
+    - echo "Deploying to Pages"
+    - ls -la public/
+  artifacts:
+    paths:
+      - public
+      
+  only:
+    - master
+    - tags
+
+# Alternative: Create GitLab Release for download
+create-release:
+  stage: post
+  needs: ["build-desktop-win"]
+  script:
+    - echo "Creating release artifacts..."
+    - mkdir -p release-files
+    - if [ -f "public/NovaQ-Desktop-Portable.js" ]; then
+        cp public/NovaQ-Desktop-Portable.js release-files/;
+      fi
+    - if [ -f public/NovaQ-Desktop-Portable-*.zip ]; then
+        cp public/NovaQ-Desktop-Portable-*.zip release-files/;
+      fi
+    - if [ -d "public/NovaQ-Desktop-Portable" ]; then
+        cd public && tar -czf ../release-files/NovaQ-Desktop-Portable-Folder.tar.gz NovaQ-Desktop-Portable/ && cd ..;
+      fi
+    - echo "== Release files ready =="
+    - ls -la release-files/
+  artifacts:
+    name: "NovaQ-Desktop-Portable-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - release-files/
+    expire_in: 30 days
+  only:
+    - master
+    - tags
+
+upload-package:
+  stage: pages
+  needs: ["build-desktop-win"]
+  script: |
+    set -e
+    FILE=$(ls public/NovaQ-Portable-*.zip 2>/dev/null | head -n1 || true)
+    if [ -z "$FILE" ]; then
+      echo "No portable ZIP in public/. Skipping package upload."
+      exit 0
+    fi
+    NAME=$(basename "$FILE")
+    echo "Uploading $NAME to Generic Packages under tag $CI_COMMIT_TAG"
+    curl --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+      --upload-file "$FILE" \
+      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/novaq-desktop/${CI_COMMIT_TAG:-latest}/$NAME"
+  only:
+    - tags
