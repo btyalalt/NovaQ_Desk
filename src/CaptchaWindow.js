@@ -508,11 +508,18 @@ class CaptchaWindowManager {
             titleBarStyle: 'default',
             title: 'Төхөөрөмж таниулах',
             show: false,
+            // Windows 7 compatibility
+            minWidth: 400,
+            minHeight: 300,
+            resizable: true,
+            maximizable: true,
+            minimizable: true,
             webPreferences: {
-                contextIsolation: true,
-                nodeIntegration: false,
-                sandbox: true,
-                webSecurity: false
+                contextIsolation: false,
+                nodeIntegration: true,
+                sandbox: false,
+                webSecurity: true,
+                enableRemoteModule: true
             },
         });
         global.captchaWindow.webContents.setUserAgent(
@@ -536,6 +543,19 @@ class CaptchaWindowManager {
             console.log('✅ CAPTCHA window ready');
             registerCaptchaNetworkHooks(isCitizen);
             startCaptchaPolling(isCitizen, captchaUrl);
+        });
+        
+        // Windows 7 compatibility - error handling
+        global.captchaWindow.webContents.on('crashed', () => {
+            console.error('❌ CAPTCHA window crashed - Windows 7 compatibility issue');
+        });
+        
+        global.captchaWindow.webContents.on('unresponsive', () => {
+            console.warn('⚠️ CAPTCHA window unresponsive - Windows 7 compatibility issue');
+        });
+        
+        global.captchaWindow.webContents.on('responsive', () => {
+            console.log('✅ CAPTCHA window responsive again');
         });
         setTimeout(() => {
             if (global.captchaWindow && !global.captchaWindow.isDestroyed()) {
