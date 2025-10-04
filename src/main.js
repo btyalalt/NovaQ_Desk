@@ -1,4 +1,65 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
+
+// Windows 7 compatibility command line switches
+if (process.platform === 'win32') {
+  const os = require('os');
+  const isWindows7 = os.release().startsWith('6.1');
+  
+  if (isWindows7) {
+    console.log('🔧 Windows 7 detected - applying compatibility switches');
+    
+    // Disable problematic features for Windows 7
+    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors,SameSiteByDefaultCookies,WebRTC');
+    app.commandLine.appendSwitch('disable-web-security');
+    app.commandLine.appendSwitch('disable-site-isolation-trials');
+    app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor');
+    
+    // Block tracking scripts to prevent 429 errors
+    app.commandLine.appendSwitch('disable-background-networking');
+    app.commandLine.appendSwitch('disable-default-apps');
+    app.commandLine.appendSwitch('disable-sync');
+    app.commandLine.appendSwitch('disable-extensions');
+    app.commandLine.appendSwitch('disable-plugins');
+    app.commandLine.appendSwitch('disable-images');
+    app.commandLine.appendSwitch('disable-javascript-harmony-shipping');
+    app.commandLine.appendSwitch('disable-features', 'TranslateUI');
+    app.commandLine.appendSwitch('disable-features', 'MediaRouter');
+    app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication');
+    
+    // TLS/SSL fixes for Windows 7
+    app.commandLine.appendSwitch('ssl-version-fallback-min', 'tls1.2');
+    app.commandLine.appendSwitch('ssl-version-fallback-max', 'tls1.3');
+    app.commandLine.appendSwitch('cipher-suite-blacklist', '0x0004,0x0005,0x000A,0x000B,0x0039,0x003A,0x003B,0x003C,0x0062,0x0063,0x0064,0x0065,0x0066,0x0067,0x0068,0x0069,0x006A,0x006B,0x006C,0x006D,0x006E,0x006F,0x0070,0x0071,0x0072,0x0073,0x0074,0x0075,0x0076,0x0077,0x0078,0x0079,0x007A,0x007B,0x007C,0x007D,0x007E,0x007F,0x0080,0x0081,0x0082,0x0083,0x0084,0x0085,0x0086,0x0087,0x0088,0x0089,0x008A,0x008B,0x008C,0x008D,0x008E,0x008F,0x0090,0x0091,0x0092,0x0093,0x0094,0x0095,0x0096,0x0097,0x0098,0x0099,0x009A,0x009B,0x009C,0x009D,0x009E,0x009F,0x00A0,0x00A1,0x00A2,0x00A3,0x00A4,0x00A5,0x00A6,0x00A7,0x00A8,0x00A9,0x00AA,0x00AB,0x00AC,0x00AD,0x00AE,0x00AF,0x00B0,0x00B1,0x00B2,0x00B3,0x00B4,0x00B5,0x00B6,0x00B7,0x00B8,0x00B9,0x00BA,0x00BB,0x00BC,0x00BD,0x00BE,0x00BF,0x00C0,0x00C1,0x00C2,0x00C3,0x00C4,0x00C5,0x00C6,0x00C7,0x00C8,0x00C9,0x00CA,0x00CB,0x00CC,0x00CD,0x00CE,0x00CF,0x00D0,0x00D1,0x00D2,0x00D3,0x00D4,0x00D5,0x00D6,0x00D7,0x00D8,0x00D9,0x00DA,0x00DB,0x00DC,0x00DD,0x00DE,0x00DF,0x00E0,0x00E1,0x00E2,0x00E3,0x00E4,0x00E5,0x00E6,0x00E7,0x00E8,0x00E9,0x00EA,0x00EB,0x00EC,0x00ED,0x00EE,0x00EF,0x00F0,0x00F1,0x00F2,0x00F3,0x00F4,0x00F5,0x00F6,0x00F7,0x00F8,0x00F9,0x00FA,0x00FB,0x00FC,0x00FD,0x00FE,0x00FF');
+    
+    // GPU fixes for Windows 7
+    app.commandLine.appendSwitch('disable-gpu');
+    app.commandLine.appendSwitch('disable-gpu-compositing');
+    app.commandLine.appendSwitch('disable-gpu-sandbox');
+    
+    // Network fixes
+    app.commandLine.appendSwitch('disable-background-timer-throttling');
+    app.commandLine.appendSwitch('disable-renderer-backgrounding');
+    app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+    
+    // Certificate fixes
+    app.commandLine.appendSwitch('ignore-certificate-errors');
+    app.commandLine.appendSwitch('ignore-ssl-errors');
+    app.commandLine.appendSwitch('ignore-certificate-errors-spki-list');
+    app.commandLine.appendSwitch('ignore-certificate-errors-spki-list');
+    
+    // React compatibility fixes
+    app.commandLine.appendSwitch('disable-features', 'V8OptimizeJavascript');
+    app.commandLine.appendSwitch('disable-features', 'ScriptStreaming');
+    app.commandLine.appendSwitch('disable-features', 'BlinkGenPropertyTrees');
+    app.commandLine.appendSwitch('disable-features', 'BlinkScheduler');
+    app.commandLine.appendSwitch('disable-features', 'BlinkSchedulerDfs');
+    app.commandLine.appendSwitch('disable-features', 'BlinkSchedulerHighPriority');
+    app.commandLine.appendSwitch('disable-features', 'BlinkSchedulerLowPriority');
+    app.commandLine.appendSwitch('disable-features', 'BlinkSchedulerNormalPriority');
+    
+    console.log('✅ Windows 7 compatibility switches applied');
+  }
+}
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -1331,6 +1392,50 @@ ipcMain.handle('exit-app', async () => {
 
 ipcMain.handle('get-computer-name', () => {
   return os.hostname();
+});
+
+// System name handler - Windows 7 compatibility
+ipcMain.handle('get-system-name', () => {
+  try {
+    const os = require('os');
+    return {
+      success: true,
+      systemName: os.hostname(),
+      platform: os.platform(),
+      arch: os.arch(),
+      release: os.release()
+    };
+  } catch (error) {
+    console.error('❌ Error getting system name:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Device ID handler - Windows 7 compatibility
+ipcMain.handle('get-device-id', () => {
+  try {
+    const os = require('os');
+    const crypto = require('crypto');
+    
+    // Generate device ID based on system info
+    const systemInfo = `${os.platform()}-${os.arch()}-${os.hostname()}`;
+    const deviceId = crypto.createHash('md5').update(systemInfo).digest('hex');
+    
+    return {
+      success: true,
+      deviceId: deviceId,
+      systemInfo: systemInfo
+    };
+  } catch (error) {
+    console.error('❌ Error getting device ID:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
 });
 
 // KhanBank cookies хадгалах - main process дээр

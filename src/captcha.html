@@ -5,15 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CAPTCHA Window</title>
     <style>
+        /* Windows 7 compatibility - ensure head is not hidden */
+        head {
+            display: block !important;
+        }
+        
         body {
             margin: 0;
             padding: 20px;
             font-family: Arial, sans-serif;
             background: #f5f5f5;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            /* Windows 7 compatibility - use table-cell instead of flexbox */
+            display: table;
+            width: 100%;
+            height: 100vh;
             min-height: 100vh;
         }
         
@@ -24,6 +29,10 @@
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             text-align: center;
             max-width: 400px;
+            /* Windows 7 compatibility - center using table-cell */
+            display: table-cell;
+            vertical-align: middle;
+            text-align: center;
         }
         
         .loading-spinner {
@@ -51,6 +60,16 @@
             color: #0076FF;
             font-size: 14px;
         }
+        
+        /* Windows 7 specific fixes */
+        .windows7-fallback {
+            display: none;
+        }
+        
+        /* Ensure proper rendering on Windows 7 */
+        * {
+            box-sizing: border-box;
+        }
     </style>
 </head>
 <body>
@@ -60,11 +79,207 @@
         <div class="status-text">KhanBank-д холбогдож байна</div>
     </div>
     
+    <!-- Windows 7 fallback content -->
+    <div class="windows7-fallback" id="windows7-fallback">
+        <div class="captcha-container">
+            <h3>Windows 7 Compatibility Mode</h3>
+            <p>CAPTCHA ачаалах боломжгүй байна. Дахин оролдоно уу.</p>
+            <button onclick="retryLoad()">Дахин оролдох</button>
+        </div>
+    </div>
+    
     <script>
-        // Auto-redirect to KhanBank after a short delay
-        setTimeout(() => {
-            window.location.href = 'https://e.khanbank.com/v3/cfrm/auth/token';
-        }, 2000);
+        // Windows 7 compatibility detection
+        function isWindows7() {
+            const userAgent = navigator.userAgent;
+            return userAgent.includes('Windows NT 6.1') || userAgent.includes('Windows 7');
+        }
+        
+        // Enhanced retry function for Windows 7
+        function retryLoad() {
+            console.log('🔄 Retrying CAPTCHA load for Windows 7...');
+            
+            // Reset flags
+            fallbackShown = false;
+            loadingStarted = false;
+            
+            document.getElementById('windows7-fallback').style.display = 'none';
+            
+            // Show main container
+            var mainContainer = document.querySelector('.captcha-container');
+            if (mainContainer) {
+                mainContainer.style.display = 'block';
+            }
+            
+            // Multiple retry strategies for Windows 7
+            setTimeout(() => {
+                try {
+                    console.log('🔍 Attempting direct URL load...');
+                    window.location.href = 'https://e.khanbank.com/v3/cfrm/auth/token';
+                } catch (error) {
+                    console.error('❌ Direct URL load failed:', error);
+                    
+                    // Fallback 1: Try with window.open
+                    try {
+                        console.log('🔍 Attempting window.open...');
+                        var newWindow = window.open('https://e.khanbank.com/v3/cfrm/auth/token', '_self');
+                        if (!newWindow) {
+                            throw new Error('Window.open failed');
+                        }
+                    } catch (openError) {
+                        console.error('❌ Window.open failed:', openError);
+                        
+                        // Fallback 2: Show manual instructions
+                        showManualInstructions();
+                    }
+                }
+            }, 1000);
+        }
+        
+        // Manual instructions for Windows 7
+        function showManualInstructions() {
+            console.log('📋 Showing manual instructions for Windows 7');
+            document.getElementById('windows7-fallback').innerHTML = `
+                <div class="captcha-container">
+                    <h3>Windows 7 Compatibility Issue</h3>
+                    <p>CAPTCHA автоматаар ачаалах боломжгүй байна.</p>
+                    <p>Дараах алхамуудыг дагана уу:</p>
+                    <ol style="text-align: left; display: inline-block;">
+                        <li>Доорх холбоосыг дараарай</li>
+                        <li>CAPTCHA-г бөглөөрэй</li>
+                        <li>Нэвтрэх товчийг дараарай</li>
+                    </ol>
+                    <br><br>
+                    <div style="margin: 10px 0;">
+                        <a href="https://e.khanbank.com/v3/cfrm/auth/token" target="_blank" 
+                           style="display: inline-block; padding: 10px 20px; background: #0076FF; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">
+                            KhanBank-д нэвтрэх (e.khanbank.com)
+                        </a>
+                        <br>
+                        <a href="https://corp.khanbank.com/auth/login" target="_blank" 
+                           style="display: inline-block; padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; margin: 5px;">
+                            Corp Bank-д нэвтрэх (corp.khanbank.com)
+                        </a>
+                    </div>
+                    <br>
+                    <button onclick="retryLoad()" style="padding: 8px 16px; margin: 10px;">
+                        Дахин оролдох
+                    </button>
+                </div>
+            `;
+        }
+        
+        // Enhanced loading for Windows 7
+        function loadCaptcha() {
+            loadingStarted = true;
+
+            try {
+                if (isWindows7()) {
+                    const urlsToTry = [
+                        'https://e.khanbank.com/v3/cfrm/auth/token',
+                        'https://e.khanbank.com/auth/login',
+                        'https://corp.khanbank.com/auth/login'
+                    ];
+
+                    let urlIndex = 0;
+                    const tryNextUrl = () => {
+                        if (urlIndex < urlsToTry.length) {
+                            const url = urlsToTry[urlIndex];
+                            try {
+                                window.location.href = url;
+                            } catch (error) {
+                                urlIndex++;
+                                setTimeout(tryNextUrl, 2000);
+                            }
+                        } else {
+                            showFallbackMessage('KhanBank-д холбогдох боломжгүй байна. Гар аргаар нэвтэрнэ үү.');
+                        }
+                    };
+
+                    setTimeout(tryNextUrl, 3000);
+                } else {
+                    setTimeout(() => {
+                        window.location.href = 'https://e.khanbank.com/v3/cfrm/auth/token';
+                    }, 2000);
+                }
+            } catch (error) {
+                showFallbackMessage('CAPTCHA ачаалах үед алдаа гарлаа.');
+            }
+        }
+        
+        // Windows 7 compatible page loading
+        function startPageLoading() {
+            console.log('🔍 Starting CAPTCHA page loading...');
+            console.log('🔍 Document ready state:', document.readyState);
+            
+            // Multiple fallback methods for Windows 7
+            if (document.readyState === 'loading') {
+                console.log('📄 Document still loading, waiting for DOMContentLoaded...');
+                document.addEventListener('DOMContentLoaded', function() {
+                    console.log('✅ DOMContentLoaded fired');
+                    setTimeout(loadCaptcha, 500); // Extra delay for Windows 7
+                });
+            } else if (document.readyState === 'interactive') {
+                console.log('📄 Document interactive, loading with delay...');
+                setTimeout(loadCaptcha, 1000); // Longer delay for Windows 7
+            } else {
+                console.log('📄 Document complete, loading immediately...');
+                setTimeout(loadCaptcha, 200); // Small delay even when complete
+            }
+            
+            // Additional fallback - window.onload
+            window.onload = function() {
+                console.log('✅ Window.onload fired');
+                setTimeout(function() {
+                    if (document.getElementById('windows7-fallback').style.display !== 'block') {
+                        console.log('🔄 Window.onload fallback - retrying load');
+                        loadCaptcha();
+                    }
+                }, 1000);
+            };
+        }
+        
+        // Start the loading process
+        startPageLoading();
+        
+        // Enhanced timeout mechanism for Windows 7
+        var loadingStarted = false;
+        var fallbackShown = false;
+        
+        function checkLoadingStatus() {
+            if (!loadingStarted && !fallbackShown) {
+                console.log('⏰ CAPTCHA load timeout - no loading started');
+                showFallbackMessage('CAPTCHA ачаалах боломжгүй байна. Дахин оролдоно уу.');
+            } else if (loadingStarted && !fallbackShown) {
+                console.log('⏰ CAPTCHA load timeout - loading started but not completed');
+                showFallbackMessage('CAPTCHA ачаалах хэт удаан байна. Дахин оролдоно уу.');
+            }
+        }
+        
+        function showFallbackMessage(message) {
+            if (fallbackShown) return;
+            fallbackShown = true;
+            
+            console.log('📋 Showing fallback message:', message);
+            document.getElementById('windows7-fallback').style.display = 'block';
+            document.getElementById('windows7-fallback').innerHTML = `
+                <div class="captcha-container">
+                    <h3>Windows 7 Compatibility</h3>
+                    <p>${message}</p>
+                    <button onclick="retryLoad()" style="padding: 8px 16px; margin: 10px;">
+                        Дахин оролдох
+                    </button>
+                    <button onclick="showManualInstructions()" style="padding: 8px 16px; margin: 10px;">
+                        Гар аргаар нэвтрэх
+                    </button>
+                </div>
+            `;
+        }
+        
+        // Multiple timeout checks for Windows 7
+        setTimeout(checkLoadingStatus, 8000);  // First check at 8 seconds
+        setTimeout(checkLoadingStatus, 12000); // Second check at 12 seconds
+        setTimeout(checkLoadingStatus, 15000); // Final check at 15 seconds
     </script>
 </body>
 </html>

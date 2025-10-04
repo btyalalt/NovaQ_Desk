@@ -80,12 +80,6 @@ const LoginScreen = () => {
     const initializeApp = async () => {
       try {
         await window.electron.invoke('focus-window');
-        // Additional focus after delay
-        setTimeout(function() {
-          window.electron.invoke('focus-window').catch(function(error) {
-            console.log('⚠️ Нэмэлт window focus алдаа:', error);
-          });
-        }, 2000);
       } catch (error) {
         console.log('⚠️ Window focus алдаа:', error);
       }
@@ -109,9 +103,7 @@ const LoginScreen = () => {
         // Debounce user data refresh to prevent multiple calls - only run once
         if (!window.userDataRefreshInitiated) {
           window.userDataRefreshInitiated = true;
-          console.log('User data refresh initiated');
           setTimeout(function() {
-            console.log('🔄 User data refresh дуудаж байна...');
             authService.refreshUserData().then(function(refreshedData) {
               if (refreshedData && refreshedData.user) {
                 setUserInfo({
@@ -125,7 +117,6 @@ const LoginScreen = () => {
                 }
                 setUserId(refreshedData.user.username);
                 setIsLoggedIn(true);
-                console.log('✅ User data refreshed on app initialization');
                 
                 // Хэрэглэгчийн мэдээлэл амжилттай сэргээгдсэн бол login history хадгалах
                 try {
@@ -184,11 +175,6 @@ const LoginScreen = () => {
                       const deviceResult = await window.electron.invoke('get-device-id');
                       deviceId = deviceResult || 'Unknown';
                       
-                      console.log('📡 System info obtained:', {
-                        clientIP,
-                        systemName,
-                        deviceId
-                      });
                     } catch (error) {
                       console.log('⚠️ System info авах алдаа:', error);
                       // Fallback to dynamic values
@@ -216,9 +202,7 @@ const LoginScreen = () => {
             }).catch(function(error) {
               console.log('⚠️ Could not refresh user data on initialization:', error);
             });
-          }, 3000); // 3 second delay to prevent rapid calls
-        } else {
-          console.log('⚠️ User data refresh already initiated, skipping...');
+          }, 3000);
         }
       }
     };
@@ -246,7 +230,6 @@ const LoginScreen = () => {
   // Theme toggle function
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
-    console.log('🔄 Theme switching from', theme, 'to', newTheme);
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
 
@@ -268,7 +251,6 @@ const LoginScreen = () => {
 
   // Handle successful login
   const handleSuccessfulLogin = async (found, result) => {
-    console.log('🚀 [LoginScreen.js] handleSuccessfulLogin called with:', { found, result });
     try {
       let clientIP = 'Unknown';
       try {
@@ -304,7 +286,6 @@ const LoginScreen = () => {
           
           if (externalIP) {
             clientIP = externalIP;
-            console.log('🌐 External IP obtained:', clientIP);
           } else {
             throw new Error('All external IP services failed');
           }
@@ -316,19 +297,16 @@ const LoginScreen = () => {
             const electronIP = await window.electron.invoke('get-client-ip');
             if (electronIP && electronIP !== 'Unknown' && !electronIP.includes('127.0.0.1')) {
               clientIP = electronIP;
-              console.log('💻 Local network IP obtained:', clientIP);
             } else {
               // Method 3: Try WebRTC to get local IP
               const localIP = await getLocalIP();
               clientIP = localIP || '192.168.1.100'; // Dynamic fallback
-              console.log('🏠 Local IP obtained:', clientIP);
             }
           } catch (electronError) {
             console.log('⚠️ Electron IP авах алдаа:', electronError);
             // Method 4: Final fallback with dynamic IP
             const fallbackIP = await getFallbackIP();
             clientIP = fallbackIP;
-            console.log('🔄 Fallback IP used:', clientIP);
           }
         }
       } catch (error) {
@@ -337,7 +315,6 @@ const LoginScreen = () => {
       }
 
       const computerNameResponse = await window.electron.invoke('get-computer-name');
-      console.log('🔍 computerNameResponse:', computerNameResponse);
       const computerName = typeof computerNameResponse === 'string' ? computerNameResponse : 'Unknown';
       const systemName = 'NovaQ_Desk';
       let deviceId = 'NoDeviceID';
@@ -385,32 +362,12 @@ const LoginScreen = () => {
       setUserId(found.username);
       setIsLoggedIn(true);
 
-      console.log('✅ Login successful, user data set:', {
-        userInfo: found,
-        customerBankAccount: result.customerBankAccount,
-        customer: result?.customer
-      });
 
       // Check for updates after successful login
       try {
-        console.log('🔄 Checking for updates after login...');
-        
-        // Show update checking notification
-        // Шинэчлэл шалгах popup-уудыг ил гаргахгүй болгосон хувилбар
-        try {
-          const updateResult = await window.electron.checkForUpdate();
-          console.log('🔄 Update check result:', updateResult);
-          // Popup харуулахгүй, зөвхөн консолд бичнэ
-          if (updateResult.updating) {
-            console.log('🔄 Update available, app will restart...');
-            // App will automatically quit and restart via updater
-          } else if (updateResult.error) {
-            console.log('⚠️ Update check failed:', updateResult.error);
-          } else {
-            console.log('✅ App is up to date');
-          }
-        } catch (updateError) {
-          console.log('⚠️ Update check error:', updateError);
+        const updateResult = await window.electron.checkForUpdate();
+        if (updateResult.updating) {
+          // App will automatically quit and restart via updater
         }
 
       } catch (error) {
@@ -434,7 +391,6 @@ const LoginScreen = () => {
     }
 
     try {
-      console.log('🔄 Нэвтрэх хүсэлт илгээж байна...');
       // XOR27 encrypt function
       const xor27Encrypt = (text) => {
         let encrypted = '';
@@ -444,26 +400,20 @@ const LoginScreen = () => {
         return encrypted;
       };
       const encryptedPassword =xor27Encrypt(password)
-      console.log('🔐 Нууц үг XOR27-оор encrypt хийгдлээ', encryptedPassword);
       const result = await authService.login({ username, password: encryptedPassword });
       
-      console.log('🔍 Login result:', result);
 
       if (result.success) {
         await handleSuccessfulLogin(result.user, result);
       } else {
-        console.log('❌ Login failed, showing alert:', result.message);
         // Show custom alert instead of browser alert
         const alertInfo = {
           title: 'Нэвтрэх амжилтгүй',
           message: result.message || 'Нэвтрэх амжилтгүй боллоо',
           type: 'error'
         };
-        console.log('🔍 Setting alert data:', alertInfo);
         setAlertData(alertInfo);
-        console.log('🔍 Setting showAlert to true');
         setShowAlert(true);
-        console.log('🔍 Alert should be visible now');
       }
     } catch (error) {
       setAlertData({
@@ -523,11 +473,7 @@ const LoginScreen = () => {
               className="title-bar-button close-button"
               onClick={function(e) {
                 e.stopPropagation();
-                window.electron.invoke('close-app').then(function(result) {
-                  console.log('🔄 Close application result:', result);
-                }).catch(function(error) {
-                  console.error('❌ Close application алдаа:', error);
-                });
+                window.electron.invoke('close-app');
               }}
               title="Close application"
             >
@@ -604,12 +550,7 @@ const LoginScreen = () => {
         </div>
         <button
           className="login-button"
-          onClick={() => {
-            console.log('🔄 Нэвтрэх button дарагдсан');
-            console.log('📋 Username:', username);
-            console.log('📋 Password:', password ? '***' : 'none');
-            handleLogin();
-          }}
+          onClick={handleLogin}
         >
           <span>Нэвтрэх</span>
           <span className="login-arrow">

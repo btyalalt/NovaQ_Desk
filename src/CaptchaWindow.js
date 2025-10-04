@@ -2,8 +2,17 @@ const { BrowserWindow, session } = require('electron');
 const path = require('path');
 // const desktopService = require('./services/desktopService'); // Removed - will import dynamically
 const { API_CONFIG } = require('./utils/constants');
+const WindowsCompatibility = require('./utils/windows7Compat');
 
 const { io } = require('socket.io-client');
+
+// Initialize Windows compatibility utility
+const winCompat = new WindowsCompatibility();
+console.log('🔧 Windows compatibility utility initialized:', {
+    isWindows7: winCompat.isWindows7,
+    isLegacyWindows: winCompat.isLegacyWindows,
+    windowsVersion: winCompat.windowsVersion
+});
 
 
 
@@ -469,6 +478,21 @@ class CaptchaWindowManager {
 
     async createCaptchaWindow(isCitizen = true, mainWindow = null) {
         console.log('🔍 createCaptchaWindow:', isCitizen);
+        console.log('🔍 createCaptchaWindow - mainWindow exists:', !!mainWindow);
+        console.log('🔍 createCaptchaWindow - isCitizen type:', typeof isCitizen, 'value:', isCitizen);
+        
+        // Ensure winCompat is initialized
+        if (!winCompat) {
+            console.error('❌ winCompat is not initialized!');
+            throw new Error('Windows compatibility utility not initialized');
+        }
+        
+        console.log('🔧 winCompat status:', {
+            isWindows7: winCompat.isWindows7,
+            isLegacyWindows: winCompat.isLegacyWindows,
+            windowsVersion: winCompat.windowsVersion
+        });
+        
 
         // Хуучин CAPTCHA цонхыг хаах
         if (global.captchaWindow && !global.captchaWindow.isDestroyed()) {
@@ -491,12 +515,32 @@ class CaptchaWindowManager {
             }
         }
 
-        // URL тохируулах
-        const captchaUrl = isCitizen
-            ? 'https://e.khanbank.com/auth/login'
-            : 'https://corp.khanbank.com/auth/login';
+        // URL тохируулах - Windows 7 compatibility
+        let captchaUrl;
+        if (winCompat && winCompat.isWindows7) {
+            // Windows 7 дээр corp.khanbank.com холболт асуудалтай тул e.khanbank.com ашиглах
+            console.log('🔧 Windows 7: Using e.khanbank.com for better compatibility');
+            captchaUrl = 'https://e.khanbank.com/auth/login';
+        } else {
+            captchaUrl = isCitizen
+                ? 'https://e.khanbank.com/auth/login'
+                : 'https://corp.khanbank.com/auth/login';
+        }
 
         const customHtmlPath = path.join(__dirname, 'captcha.html');
+        console.log('🔍 Windows compatibility needed:', winCompat.needsCompatibility());
+        console.log('🔍 Windows version:', winCompat.windowsVersion);
+        
+        // Apply session fixes for Windows
+        winCompat.applySessionFixes();
+        
+        // Windows 7 specific debugging
+        if (winCompat && winCompat.isWindows7) {
+            console.log('🔧 Windows 7 detected - applying enhanced compatibility fixes');
+        }
+        
+        console.log('🔧 Creating BrowserWindow with options...');
+        
         global.captchaWindow = new BrowserWindow({
             width: 800,
             height: 600,
@@ -508,61 +552,211 @@ class CaptchaWindowManager {
             titleBarStyle: 'default',
             title: 'Төхөөрөмж таниулах',
             show: false,
-            // Windows 7 compatibility
+            // Windows compatibility
             minWidth: 400,
             minHeight: 300,
             resizable: true,
             maximizable: true,
             minimizable: true,
-            webPreferences: {
-                contextIsolation: false,
-                nodeIntegration: true,
-                sandbox: false,
-                webSecurity: true,
-                enableRemoteModule: true
-            },
+            // Windows specific settings
+            ...winCompat.getCompatibleWindowOptions(),
+            webPreferences: winCompat.getCompatibleWebPreferences()
         });
-        global.captchaWindow.webContents.setUserAgent(
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36'
-        );
-        await global.captchaWindow.loadFile(customHtmlPath);
+        
+        console.log('✅ BrowserWindow created successfully');
+        // Set appropriate User Agent for Windows
+        const userAgent = winCompat.getCompatibleUserAgent();
+        global.captchaWindow.webContents.setUserAgent(userAgent);
+        console.log('🔍 User Agent set:', userAgent);
+        
+        // Windows 7 specific: Load HTML content directly to avoid chrome-error
+        if (winCompat && winCompat.isWindows7) {
+            console.log('🔧 Windows 7: Loading HTML content directly...');
+            try {
+                const fs = require('fs');
+                if (fs.existsSync(customHtmlPath)) {
+                    const htmlContent = fs.readFileSync(customHtmlPath, 'utf8');
+                    console.log('🔧 Windows 7: HTML file found, size:', htmlContent.length, 'bytes');
+                    
+                    // Create data URL with HTML content
+                    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`;
+                    console.log('🔧 Windows 7: Loading data URL...');
+                    
+                    await global.captchaWindow.webContents.loadURL(dataUrl);
+                    console.log('✅ Windows 7: HTML content loaded directly via data URL');
+                    
+                } else {
+                    throw new Error('HTML file not found at: ' + customHtmlPath);
+                }
+            } catch (directLoadError) {
+                console.error('❌ Windows 7: Direct HTML load failed:', directLoadError);
+                // Fallback to regular loadFile
+                try {
+                    console.log('🔧 Windows 7: Trying loadFile fallback...');
+                    await global.captchaWindow.loadFile(customHtmlPath);
+                    console.log('⚠️ Windows 7: Fallback to regular loadFile');
+                } catch (fallbackError) {
+                    console.error('❌ Windows 7: Fallback loadFile also failed:', fallbackError);
+                    // Final fallback - create minimal HTML content
+                    const minimalHtml = `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <title>CAPTCHA Window</title>
+                            <style>
+                                body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
+                                .error { color: red; margin: 20px 0; }
+                                .button { padding: 10px 20px; margin: 10px; background: #0076FF; color: white; border: none; border-radius: 5px; cursor: pointer; }
+                            </style>
+                        </head>
+                        <body>
+                            <h3>Windows 7 Compatibility Issue</h3>
+                            <p class="error">CAPTCHA автоматаар ачаалах боломжгүй байна.</p>
+                            <p>Гар аргаар нэвтэрнэ үү:</p>
+                            <a href="https://e.khanbank.com/v3/cfrm/auth/token" target="_blank" class="button">KhanBank-д нэвтрэх</a>
+                            <br>
+                            <a href="https://corp.khanbank.com/auth/login" target="_blank" class="button">Corp Bank-д нэвтрэх</a>
+                        </body>
+                        </html>
+                    `;
+                    await global.captchaWindow.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(minimalHtml)}`);
+                    console.log('✅ Windows 7: Minimal HTML content loaded as final fallback');
+                }
+            }
+        } else {
+            console.log('🔧 Standard system: Loading HTML file...');
+            await global.captchaWindow.loadFile(customHtmlPath);
+        }
+        
+        
+        // Setup Windows specific event listeners
+        winCompat.setupWindowsEventListeners(global.captchaWindow);
+        
+        
+        // Get appropriate loading delay
+        const loadDelay = winCompat.getLoadingDelay();
+        console.log('🔍 Loading delay:', loadDelay);
+        
         setTimeout(async () => {
             try {
-                await global.captchaWindow.loadURL(captchaUrl);
+                console.log('🔍 Loading KhanBank URL:', captchaUrl);
+                
+                
+                // Load KhanBank URL
+                await winCompat.loadURLWithRetry(global.captchaWindow.webContents, captchaUrl);
+                console.log('✅ KhanBank URL loaded successfully');
+                
             } catch (err) {
                 console.error('❌ KhanBank URL ачаалахад алдаа:', err);
+                
             }
-        }, 3000);
+        }, loadDelay);
         global.captchaWindow.on('closed', () => {
-            global.captchaWindow = null;
             global.captchaWindow = null;
             clearCaptchaNetworkHooks();
             console.log('🔒 CAPTCHA window closed');
         });
         global.captchaWindow.once('ready-to-show', () => {
-            console.log('✅ CAPTCHA window ready');
-            registerCaptchaNetworkHooks(isCitizen);
-            startCaptchaPolling(isCitizen, captchaUrl);
+            console.log('✅ CAPTCHA window ready-to-show event fired');
+            console.log('   - Window visible:', global.captchaWindow.isVisible());
+            console.log('   - Window destroyed:', global.captchaWindow.isDestroyed());
+            
+            // Windows 7 specific ready-to-show handling
+            if (winCompat && winCompat.isWindows7) {
+                console.log('🔧 Windows 7: CAPTCHA window ready-to-show');
+                
+                // Additional delay for Windows 7
+                setTimeout(() => {
+                    console.log('🔧 Windows 7: Starting network hooks and polling...');
+                    try {
+                        registerCaptchaNetworkHooks(isCitizen);
+                        startCaptchaPolling(isCitizen, captchaUrl);
+                        console.log('✅ Windows 7: Network hooks and polling started successfully');
+                    } catch (error) {
+                        console.error('❌ Windows 7: Error starting network hooks and polling:', error);
+                    }
+                }, 2000);
+            } else {
+                try {
+                    registerCaptchaNetworkHooks(isCitizen);
+                    startCaptchaPolling(isCitizen, captchaUrl);
+                    console.log('✅ Network hooks and polling started successfully');
+                } catch (error) {
+                    console.error('❌ Error starting network hooks and polling:', error);
+                }
+            }
         });
         
-        // Windows 7 compatibility - error handling
-        global.captchaWindow.webContents.on('crashed', () => {
-            console.error('❌ CAPTCHA window crashed - Windows 7 compatibility issue');
-        });
-        
-        global.captchaWindow.webContents.on('unresponsive', () => {
-            console.warn('⚠️ CAPTCHA window unresponsive - Windows 7 compatibility issue');
-        });
-        
+        // Standard event listeners (Windows 7 specific ones are handled by compatibility utility)
         global.captchaWindow.webContents.on('responsive', () => {
             console.log('✅ CAPTCHA window responsive again');
         });
+        // Windows 7 specific delay for showing window
+        const showDelay = (winCompat && winCompat.isWindows7) ? 3000 : 1000;
+        console.log(`⏰ Setting up window show delay: ${showDelay}ms`);
+        
         setTimeout(() => {
+            console.log('⏰ Window show timeout triggered');
+            console.log('   - CAPTCHA window exists:', !!global.captchaWindow);
+            console.log('   - CAPTCHA window destroyed:', global.captchaWindow ? global.captchaWindow.isDestroyed() : 'N/A');
+            
             if (global.captchaWindow && !global.captchaWindow.isDestroyed()) {
-                global.captchaWindow.show();
-                console.log('✅ CAPTCHA window shown (fallback)');
+                try {
+                    global.captchaWindow.show();
+                    console.log(`✅ CAPTCHA window shown (fallback) - delay: ${showDelay}ms`);
+                    
+                    // Windows 7 specific: Force focus and bring to front
+                    if (winCompat && winCompat.isWindows7) {
+                        global.captchaWindow.focus();
+                        global.captchaWindow.moveTop();
+                        console.log('🔧 Windows 7: Forced window focus and move to top');
+                        
+                        // Additional Windows 7 debugging
+                        setTimeout(() => {
+                            console.log('🔧 Windows 7: Final window state check...');
+                            console.log('   - Window visible:', global.captchaWindow.isVisible());
+                            console.log('   - Window focused:', global.captchaWindow.isFocused());
+                            console.log('   - Window destroyed:', global.captchaWindow.isDestroyed());
+                            console.log('   - WebContents loading:', global.captchaWindow.webContents.isLoading());
+                            
+                            // Check if content is actually visible
+                            global.captchaWindow.webContents.executeJavaScript(`
+                                console.log('🔧 Windows 7: Final content check...');
+                                console.log('   - Document ready state:', document.readyState);
+                                console.log('   - Body content length:', document.body ? document.body.innerHTML.length : 0);
+                                console.log('   - Captcha container visible:', document.querySelector('.captcha-container') ? 'Yes' : 'No');
+                                console.log('   - Windows 7 fallback visible:', document.getElementById('windows7-fallback') ? 'Yes' : 'No');
+                                console.log('   - Current URL:', window.location.href);
+                                
+                                // If content is still empty, trigger fallback
+                                if (document.body && document.body.innerHTML.length < 100) {
+                                    console.warn('⚠️ Windows 7: Content still empty, triggering fallback');
+                                    if (typeof showFallbackMessage === 'function') {
+                                        showFallbackMessage('CAPTCHA агуулга хоосон байна. Гар аргаар нэвтэрнэ үү.');
+                                    }
+                                }
+                            `).catch(err => console.warn('⚠️ Could not perform final Windows 7 content check:', err));
+                        }, 1000);
+                    }
+                } catch (showError) {
+                    console.error('❌ Error showing CAPTCHA window:', showError);
+                }
+            } else {
+                console.error('❌ CAPTCHA window could not be shown - window is null or destroyed');
+                if (winCompat && winCompat.isWindows7) {
+                    console.error('🔧 Windows 7: Attempting to recreate CAPTCHA window...');
+                    // Try to recreate the window
+                    setTimeout(async () => {
+                        try {
+                            const newWindow = await captchaWindowManager.createCaptchaWindow(isCitizen, mainWindow);
+                            console.log('✅ Windows 7: CAPTCHA window recreated successfully');
+                        } catch (recreateError) {
+                            console.error('❌ Windows 7: Failed to recreate CAPTCHA window:', recreateError);
+                        }
+                    }, 2000);
+                }
             }
-        }, 1000);
+        }, showDelay);
 
         return global.captchaWindow;
     }

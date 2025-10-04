@@ -79,6 +79,7 @@ class AuthService {
           clientIP: credentials.clientIP,
           computerName: credentials.computerName,
           systemName: credentials.systemName,
+          deviceId: credentials.deviceId || 'Unknown',
           DesktopVersion: credentials.DesktopVersion || packageJson.version
         })
       });
