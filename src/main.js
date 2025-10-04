@@ -442,7 +442,10 @@ async function performVersionChecks(mainWindow, app, forceCheck = false) {
                     console.log('🔄 STARTING UPDATER.EXE...');
                     console.log('📥 Download URL: ${downloadUrl}');
                     console.log('📁 Target Directory: ${INSTALL_DIR.replace(/\\/g, '\\\\')}');
+                    console.log('📝 Update log file: ${INSTALL_DIR.replace(/\\/g, '\\\\')}\\\\update.log');
                     console.log('⏳ Please wait while update completes...');
+                    console.log('🔍 Updater process monitoring started...');
+                    console.log('💡 If update takes too long, check update.log file');
                   `;
                   
                   mainWindow.webContents.executeJavaScript(updaterStartScript).catch(err => {
@@ -456,12 +459,33 @@ async function performVersionChecks(mainWindow, app, forceCheck = false) {
                 console.log('🔍 DEBUG: Keeping main window visible during update...');
                 console.log('🔍 DEBUG: Main window will stay open for user to see progress');
                 
+                // Windows 7 compatibility check
+                const os = require('os');
+                const release = os.release();
+                const version = parseFloat(release);
+                const isWindows7 = version >= 6.1 && version < 6.2;
+                
+                console.log('🔍 Windows version check:', {
+                  release: release,
+                  version: version,
+                  isWindows7: isWindows7
+                });
+                
                 // Start updater.exe with download URL
                 const { spawn } = require('child_process');
-                const updaterProcess = spawn(updaterPath, [downloadUrl], {
+                const spawnOptions = {
                   detached: true,
-                  stdio: 'ignore'
-                });
+                  stdio: ['ignore', 'pipe', 'pipe'] // Capture stdout and stderr for monitoring
+                };
+                
+                // Windows 7 specific options
+                if (isWindows7) {
+                  spawnOptions.windowsHide = false; // Show console for debugging
+                  spawnOptions.shell = false; // Don't use shell
+                  console.log('🔧 Windows 7 compatibility options applied');
+                }
+                
+                const updaterProcess = spawn(updaterPath, [downloadUrl], spawnOptions);
                 
                 console.log('🔍 DEBUG: Updater process spawned, PID:', updaterProcess.pid);
                 
@@ -469,13 +493,83 @@ async function performVersionChecks(mainWindow, app, forceCheck = false) {
                 global.updaterProcess = updaterProcess;
                 console.log('🔍 DEBUG: Updater process stored in global');
                 
-                // Don't listen to stdout/stderr since stdio: 'ignore'
-                console.log('🔍 DEBUG: Updater process started with stdio: ignore');
-                console.log('🔍 DEBUG: Updater will run independently without output capture');
+                // Monitor updater process output
+                let updaterOutput = '';
+                let lastOutputTime = Date.now();
+                
+                updaterProcess.stdout.on('data', (data) => {
+                  const output = data.toString();
+                  updaterOutput += output;
+                  lastOutputTime = Date.now();
+                  console.log('📋 [UPDATER OUTPUT]:', output.trim());
+                  
+                  // Send progress to renderer
+                  if (mainWindow && mainWindow.webContents) {
+                    mainWindow.webContents.send('updater-progress', {
+                      message: output.trim(),
+                      timestamp: new Date().toISOString()
+                    });
+                  }
+                });
+                
+                updaterProcess.stderr.on('data', (data) => {
+                  const error = data.toString();
+                  console.error('❌ [UPDATER ERROR]:', error.trim());
+                  lastOutputTime = Date.now();
+                  
+                  // Send error to renderer
+                  if (mainWindow && mainWindow.webContents) {
+                    mainWindow.webContents.send('updater-error', {
+                      message: error.trim(),
+                      timestamp: new Date().toISOString()
+                    });
+                  }
+                });
+                
+                // Process monitoring timeout (30 minutes for Windows 7)
+                const monitoringTimeout = setTimeout(() => {
+                  console.log('⏰ Updater process monitoring timeout (30 minutes)');
+                  
+                  // Check if process is still running
+                  try {
+                    process.kill(updaterProcess.pid, 0); // Check if process exists
+                    console.log('⚠️ Updater process still running after timeout');
+                    
+                    // Send timeout warning to renderer
+                    if (mainWindow && mainWindow.webContents) {
+                      mainWindow.webContents.send('updater-timeout', {
+                        message: 'Updater is taking longer than expected. Please wait or restart the application.',
+                        pid: updaterProcess.pid
+                      });
+                    }
+                  } catch (error) {
+                    console.log('✅ Updater process already exited');
+                  }
+                }, 30 * 60 * 1000); // 30 minutes
+                
+                // Store timeout for cleanup
+                global.updaterMonitoringTimeout = monitoringTimeout;
                 
                 updaterProcess.on('close', (code) => {
                   console.log(`🔄 Updater process exited with code: ${code}`);
                   console.log('🔍 DEBUG: Updater close event fired');
+                  
+                  // Clear monitoring timeout
+                  if (global.updaterMonitoringTimeout) {
+                    clearTimeout(global.updaterMonitoringTimeout);
+                    global.updaterMonitoringTimeout = null;
+                    console.log('🔍 DEBUG: Updater monitoring timeout cleared');
+                  }
+                  
+                  // Send completion status to renderer
+                  if (mainWindow && mainWindow.webContents) {
+                    mainWindow.webContents.send('updater-complete', {
+                      code: code,
+                      success: code === 0,
+                      message: code === 0 ? 'Update completed successfully' : `Update failed with code: ${code}`,
+                      timestamp: new Date().toISOString()
+                    });
+                  }
                   
                   if (code === 0) {
                     console.log('✅ Update completed successfully');
@@ -1123,7 +1217,7 @@ function createWindow() {
       webSecurity: true,
       allowRunningInsecureContent: false
     },
-    icon: path.join(__dirname, '../assets/Logopng.png'),
+    icon: path.join(__dirname, '../assets/Logo.ico'),
     titleBarStyle: 'default',
   });
   mainWindow.setAlwaysOnTop(true, "screen-saver");
@@ -1431,6 +1525,84 @@ ipcMain.handle('get-device-id', () => {
     };
   } catch (error) {
     console.error('❌ Error getting device ID:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// Manual updater trigger for Windows 7 debugging
+ipcMain.handle('manual-updater-trigger', async (event, downloadUrl) => {
+  try {
+    console.log('🔧 Manual updater trigger requested');
+    console.log('📥 Download URL:', downloadUrl);
+    
+    // Check if updater exists
+    const updaterPath = path.join(__dirname, '..', 'updater-32.exe');
+    if (!fs.existsSync(updaterPath)) {
+      throw new Error('Updater executable not found: ' + updaterPath);
+    }
+    
+    // Start updater manually with detailed logging
+    const { spawn } = require('child_process');
+    const updaterProcess = spawn(updaterPath, [downloadUrl], {
+      detached: false, // Keep attached for debugging
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    
+    console.log('🔧 Manual updater process started, PID:', updaterProcess.pid);
+    
+    // Log all output
+    updaterProcess.stdout.on('data', (data) => {
+      const output = data.toString();
+      console.log('📋 [MANUAL UPDATER]:', output.trim());
+      
+      // Send to renderer
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('manual-updater-output', {
+          type: 'stdout',
+          message: output.trim(),
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+    
+    updaterProcess.stderr.on('data', (data) => {
+      const error = data.toString();
+      console.error('❌ [MANUAL UPDATER ERROR]:', error.trim());
+      
+      // Send to renderer
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('manual-updater-output', {
+          type: 'stderr',
+          message: error.trim(),
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+    
+    updaterProcess.on('close', (code) => {
+      console.log(`🔧 Manual updater process exited with code: ${code}`);
+      
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('manual-updater-complete', {
+          code: code,
+          success: code === 0,
+          message: code === 0 ? 'Manual update completed successfully' : `Manual update failed with code: ${code}`,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+    
+    return {
+      success: true,
+      pid: updaterProcess.pid,
+      message: 'Manual updater process started'
+    };
+    
+  } catch (error) {
+    console.error('❌ Manual updater trigger error:', error);
     return {
       success: false,
       error: error.message

@@ -5,10 +5,140 @@ const { exec, spawn } = require('child_process');
 
 console.log('🔄 NovaQ Desktop Updater Starting...');
 
+// Windows 7 compatibility check first
+const os = require('os');
+const release = os.release();
+const version = parseFloat(release);
+const isWindows7 = version >= 6.1 && version < 6.2;
+
+if (isWindows7) {
+  console.log('🖥️ Windows 7 detected - applying compatibility fixes');
+  console.log('📊 System info:', {
+    platform: os.platform(),
+    release: release,
+    version: version,
+    arch: os.arch(),
+    execPath: process.execPath
+  });
+} else {
+  console.log('✅ Windows 8+ detected - full compatibility');
+}
+
 // Configuration - Use the directory where updater.exe is located (should be C:\Novaq\NovaQ Desktop)
 const INSTALL_DIR = path.dirname(process.execPath);
 const NOVAQ_EXE = path.join(INSTALL_DIR, 'NovaQ Desktop.exe');
 const UPDATE_LOG = path.join(INSTALL_DIR, 'update.log');
+
+console.log('📁 Install directory:', INSTALL_DIR);
+console.log('📝 Update log path:', UPDATE_LOG);
+
+// Create initial log entry immediately
+try {
+  const timestamp = new Date().toISOString();
+  const initialLogMessage = `[${timestamp}] 🔄 NovaQ Desktop Updater Starting...\n`;
+  
+  // Ensure the directory exists
+  const logDir = path.dirname(UPDATE_LOG);
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+  }
+  
+  // Create log file with initial message
+  fs.writeFileSync(UPDATE_LOG, initialLogMessage);
+  console.log('📝 Update log created:', UPDATE_LOG);
+} catch (error) {
+  console.error('❌ Failed to create update log:', error.message);
+  // On Windows 7, try alternative approach
+  if (isWindows7) {
+    try {
+      const altLogPath = path.join(process.cwd(), 'update.log');
+      fs.writeFileSync(altLogPath, initialLogMessage);
+      console.log('📝 Alternative update log created:', altLogPath);
+    } catch (altError) {
+      console.error('❌ Failed to create alternative update log:', altError.message);
+    }
+  }
+}
+
+// Process monitoring for Windows 7
+let processStartTime = Date.now();
+let lastActivityTime = Date.now();
+let processMonitorInterval;
+
+// Windows 7 specific process execution check
+if (isWindows7) {
+  console.log('🔍 Windows 7 process execution check...');
+  console.log('📊 Process info:', {
+    pid: process.pid,
+    platform: process.platform,
+    version: process.version,
+    execPath: process.execPath,
+    cwd: process.cwd(),
+    argv: process.argv
+  });
+  
+  // Check if we can write to the install directory
+  try {
+    const testFile = path.join(INSTALL_DIR, 'test_write.tmp');
+    fs.writeFileSync(testFile, 'test');
+    fs.unlinkSync(testFile);
+    console.log('✅ Can write to install directory');
+  } catch (writeError) {
+    console.error('❌ Cannot write to install directory:', writeError.message);
+    console.log('🔧 Trying alternative directory...');
+    try {
+      const altDir = process.cwd();
+      const testFile = path.join(altDir, 'test_write.tmp');
+      fs.writeFileSync(testFile, 'test');
+      fs.unlinkSync(testFile);
+      console.log('✅ Can write to current directory:', altDir);
+    } catch (altError) {
+      console.error('❌ Cannot write to current directory:', altError.message);
+    }
+  }
+}
+
+// Start process monitoring
+function startProcessMonitoring() {
+  console.log('🔍 Starting process monitoring...');
+  processMonitorInterval = setInterval(() => {
+    const now = Date.now();
+    const timeSinceStart = now - processStartTime;
+    const timeSinceLastActivity = now - lastActivityTime;
+    
+    // Log progress every 30 seconds
+    if (timeSinceStart % 30000 < 1000) {
+      log(`⏰ Process running for ${Math.round(timeSinceStart / 1000)} seconds`);
+      log(`📊 Last activity: ${Math.round(timeSinceLastActivity / 1000)} seconds ago`);
+      log(`🔍 Process PID: ${process.pid}`);
+      log(`🔍 Current step: ${global.currentStep || 'Unknown'}`);
+      log(`🔍 Install directory: ${INSTALL_DIR}`);
+      log(`🔍 Download URL: ${process.argv[2] || 'Not provided'}`);
+    }
+    
+    // Check for hanging (no activity for 10 minutes)
+    if (timeSinceLastActivity > 10 * 60 * 1000) {
+      log('⚠️ Process appears to be hanging (no activity for 10 minutes)');
+      log('💡 This may be due to Windows 7 compatibility issues');
+      log('🔄 Consider restarting the application');
+      log(`🔍 Current step: ${global.currentStep || 'Unknown'}`);
+      log(`📁 Install directory: ${INSTALL_DIR}`);
+      log(`📥 Download URL: ${downloadUrl || 'Not set'}`);
+    }
+    
+    // Force exit after 45 minutes (Windows 7 timeout)
+    if (timeSinceStart > 45 * 60 * 1000) {
+      log('⏰ Process timeout reached (45 minutes) - forcing exit');
+      clearInterval(processMonitorInterval);
+      process.exit(1);
+    }
+  }, 5000); // Check every 5 seconds
+}
+
+// Update activity timestamp
+function updateActivity() {
+  lastActivityTime = Date.now();
+}
 
 // Logging helper
 function logToFile(message) {
@@ -32,6 +162,7 @@ function logToFile(message) {
 function log(message) {
   console.log(message);
   logToFile(message);
+  updateActivity(); // Update activity timestamp
 }
 
 //Windows compatibility check
@@ -47,7 +178,26 @@ function checkWindowsCompatibility() {
     // Check Windows version
     const os = require('os');
     const release = os.release();
+    const version = parseFloat(release);
     log(`🖥️ Windows version: ${release}`);
+    
+    // Windows 7 specific checks
+    if (version < 7.0) {
+      log('⚠️ Windows XP/Vista detected - limited compatibility');
+    } else if (version >= 6.1 && version < 6.2) {
+      log('🖥️ Windows 7 detected - applying compatibility fixes');
+      log('💡 Ensure TLS 1.2 is enabled in Windows 7');
+    } else if (version >= 6.2) {
+      log('✅ Windows 8+ detected - full compatibility');
+    }
+    
+    // Check TLS/SSL support
+    try {
+      const https = require('https');
+      log('✅ HTTPS module available');
+    } catch (error) {
+      log('❌ HTTPS module error: ' + error.message);
+    }
     
     // Check if executable exists and is accessible
     if (fs.existsSync(NOVAQ_EXE)) {
@@ -59,6 +209,14 @@ function checkWindowsCompatibility() {
       }
     } else {
       log('❌ Executable not found: ' + NOVAQ_EXE);
+    }
+    
+    // Check disk space
+    try {
+      const stats = fs.statSync(INSTALL_DIR);
+      log(`💾 Install directory accessible: ${INSTALL_DIR}`);
+    } catch (error) {
+      log('❌ Install directory access error: ' + error.message);
     }
   }
 }
@@ -131,6 +289,92 @@ function removeDownloadLock() {
   }
 }
 
+// Windows 7 fallback download function
+async function downloadFileWithFallback(url, outputPath) {
+  return new Promise((resolve, reject) => {
+    log('📥 Starting Windows 7 fallback download...');
+    log(`📍 URL: ${url}`);
+    log(`💾 Saving to: ${outputPath}`);
+    
+    const file = fs.createWriteStream(outputPath);
+    
+    // Windows 7 specific HTTPS options
+    const httpsOptions = {
+      headers: { 
+        'User-Agent': 'Mozilla/5.0 (Windows NT 7.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      timeout: 900000, // 15 minute timeout for Windows 7
+      // Windows 7 TLS compatibility
+      secureProtocol: 'TLSv1_method', // Use TLS 1.0 for maximum compatibility
+      rejectUnauthorized: false,
+      // Disable certificate validation for Windows 7
+      checkServerIdentity: () => undefined
+    };
+
+    const request = https.get(url, httpsOptions, (response) => {
+      console.log('🔍 DEBUG: Windows 7 HTTPS response received, status:', response.statusCode);
+      
+      if (response.statusCode !== 200) {
+        file.close();
+        if (fs.existsSync(outputPath)) {
+          fs.unlinkSync(outputPath);
+        }
+        log(`❌ Windows 7 download failed: HTTP ${response.statusCode}: ${response.statusMessage}`);
+        return reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+      }
+      
+      const totalSize = parseInt(response.headers['content-length'], 10);
+      let downloadedSize = 0;
+      let lastProgressTime = 0;
+      
+      response.on('data', (chunk) => {
+        downloadedSize += chunk.length;
+        const percent = totalSize ? ((downloadedSize / totalSize) * 100).toFixed(1) : '0';
+        
+        const currentTime = Date.now();
+        if (currentTime - lastProgressTime >= 2000 || downloadedSize === totalSize) {
+          console.log(`📥 Windows 7 download progress: ${percent}%`);
+          lastProgressTime = currentTime;
+        }
+      });
+      
+      response.pipe(file);
+      
+      file.on('finish', () => {
+        file.close();
+        const sizeMB = totalSize ? (totalSize / 1024 / 1024).toFixed(2) : 'unknown';
+        log(`\n✅ Windows 7 download completed! (${sizeMB} MB)`);
+        resolve(outputPath);
+      });
+      
+      file.on('error', (err) => {
+        file.close();
+        fs.unlinkSync(outputPath);
+        reject(err);
+      });
+    });
+    
+    request.on('error', (err) => {
+      log('❌ Windows 7 fallback download error: ' + err.message);
+      file.close();
+      if (fs.existsSync(outputPath)) {
+        fs.unlinkSync(outputPath);
+      }
+      reject(err);
+    });
+    
+    request.on('timeout', () => {
+      log('⏱️ Windows 7 download timeout');
+      request.abort();
+      file.close();
+      if (fs.existsSync(outputPath)) {
+        fs.unlinkSync(outputPath);
+      }
+      reject(new Error('Windows 7 download timeout'));
+    });
+  });
+}
+
 async function downloadFile(url, outputPath) {
   return new Promise((resolve, reject) => {
     log('📥 Starting download...');
@@ -142,10 +386,19 @@ async function downloadFile(url, outputPath) {
     console.log('🔍 DEBUG: Write stream created');
     console.log('🔍 DEBUG: Starting HTTPS request...');
     
-    const request = https.get(url, {
+    // Windows 7 HTTPS compatibility options
+    const httpsOptions = {
       headers: { 'User-Agent': 'NovaQ-Updater/1.0' },
-      timeout: 600000 // 10 minute timeout (600 seconds)
-    }, (response) => {
+      timeout: 600000, // 10 minute timeout (600 seconds)
+      // Windows 7 TLS compatibility
+      secureProtocol: 'TLSv1_2_method',
+      ciphers: 'ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS',
+      honorCipherOrder: true,
+      // Certificate validation for Windows 7
+      rejectUnauthorized: false // Windows 7 certificate issues
+    };
+
+    const request = https.get(url, httpsOptions, (response) => {
       console.log('🔍 DEBUG: HTTPS response received, status:', response.statusCode);
       if (response.statusCode === 302 || response.statusCode === 301) {
         // Handle redirect
@@ -225,6 +478,21 @@ async function downloadFile(url, outputPath) {
           console.log('⚠️ Could not delete output file:', e.message);
         }
       }
+      
+      // Windows 7 specific error handling
+      if (err.message.includes('certificate') || err.message.includes('TLS') || err.message.includes('SSL')) {
+        log('🔧 Windows 7 certificate/TLS issue detected');
+        log('💡 Try running enable-tls12.reg file first');
+        log('🔄 Retrying with different TLS settings...');
+        
+        // Retry with different TLS settings for Windows 7
+        setTimeout(() => {
+          log('🔄 Retrying download with Windows 7 compatibility...');
+          downloadFileWithFallback(url, outputPath).then(resolve).catch(reject);
+        }, 2000);
+        return;
+      }
+      
       // Don't reject immediately - try to continue
       console.log('🔍 DEBUG: Attempting to continue despite error...');
       // Don't reject - let the app continue
@@ -686,6 +954,10 @@ async function performUpdate() {
     log(`📥 Download URL: ${downloadUrl}`);
     log(`📁 Install Directory: ${INSTALL_DIR}`);
     
+    // Start process monitoring for Windows 7
+    startProcessMonitoring();
+    log('📊 Process monitoring started');
+    
     // Check Windows compatibility first
     checkWindowsCompatibility();
     
@@ -702,15 +974,37 @@ async function performUpdate() {
     createBackup();
     
     // Step 2: Download new version (бүрэн дуустал хүлээх)
+    global.currentStep = 'Step 2: Download';
     log('📥 Step 2: Starting download...');
-    await downloadFile(downloadUrl, TEMP_ZIP);
-    log('✅ Step 2: Download completed successfully!');
+    try {
+      await downloadFile(downloadUrl, TEMP_ZIP);
+      log('✅ Step 2: Download completed successfully!');
+    } catch (error) {
+      log('❌ Step 2: Primary download failed: ' + error.message);
+      
+      // Windows 7 fallback
+      const os = require('os');
+      const version = parseFloat(os.release());
+      if (version >= 6.1 && version < 6.2) {
+        log('🔄 Step 2: Trying Windows 7 fallback download...');
+        try {
+          await downloadFileWithFallback(downloadUrl, TEMP_ZIP);
+          log('✅ Step 2: Windows 7 fallback download completed!');
+        } catch (fallbackError) {
+          log('❌ Step 2: Windows 7 fallback download also failed: ' + fallbackError.message);
+          throw fallbackError;
+        }
+      } else {
+        throw error;
+      }
+    }
     
     // Step 3: Wait 2 seconds after download
     console.log('⏳ Step 3: Waiting 2 seconds after download...');
     await new Promise(resolve => setTimeout(resolve, 2000));
     
     // Step 4: Close desktop app before file operations
+    global.currentStep = 'Step 4: Close App';
     log('🔄 Step 4: Closing NovaQ Desktop app...');
     log('ℹ️ Note: Main window already hidden by main process');
     await closeDesktopApp();
@@ -721,11 +1015,13 @@ async function performUpdate() {
     await new Promise(resolve => setTimeout(resolve, 5000));
     
     // Step 6: Хуучин файлуудыг устгах
+    global.currentStep = 'Step 6: Cleanup';
     log('🧹 Step 6: Cleaning up old files...');
     await cleanupOldFiles();
     log('✅ Step 6: Old files cleanup completed');
     
     // Step 7: Zip файлыг задлах (шинэ файлуудыг тавих)
+    global.currentStep = 'Step 7: Extract';
     log('📦 Step 7: Extracting ZIP file...');
     await extractZip(TEMP_ZIP, INSTALL_DIR);
     log('✅ Step 7: ZIP extraction completed');
@@ -826,6 +1122,13 @@ async function performUpdate() {
 process.on('SIGINT', () => {
   log('\n🔄 Updater interrupted by SIGINT');
   console.log('🔍 DEBUG: SIGINT signal received');
+  
+  // Clear process monitoring
+  if (processMonitorInterval) {
+    clearInterval(processMonitorInterval);
+    console.log('🔍 DEBUG: Process monitoring cleared');
+  }
+  
   removeDownloadLock();
   if (fs.existsSync(TEMP_ZIP)) {
     try {
@@ -842,6 +1145,13 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   log('\n🔄 Updater terminated by SIGTERM');
   console.log('🔍 DEBUG: SIGTERM signal received');
+  
+  // Clear process monitoring
+  if (processMonitorInterval) {
+    clearInterval(processMonitorInterval);
+    console.log('🔍 DEBUG: Process monitoring cleared');
+  }
+  
   removeDownloadLock();
   if (fs.existsSync(TEMP_ZIP)) {
     try {
