@@ -49,7 +49,7 @@ class SocketService {
       // User ID-тай холболт хийх - WebSocket алдааг багасгах
       const options = userId ? { 
         query: { userId: userId },
-        transports: ['polling', 'websocket'], // Polling-г эхлээд оролдох
+        transports: ['polling'], // Зөвхөн polling ашиглах - WebSocket алдааг бүрэн арилгах
         timeout: 15000, // 15 секунд timeout
         forceNew: true, // Шинэ холболт үүсгэх
         reconnection: true, // Автомат дахин холбогдох
@@ -58,10 +58,10 @@ class SocketService {
         reconnectionDelayMax: 10000, // Хамгийн ихдээ 10 секунд хүлээх
         maxReconnectionAttempts: 5, // Хамгийн ихдээ 5 удаа оролдох
         autoConnect: true, // Автомат холбогдох
-        upgrade: true, // WebSocket upgrade зөвшөөрөх
+        upgrade: false, // WebSocket upgrade хориглох
         rememberUpgrade: false // Upgrade-г санахгүй байх
       } : {
-        transports: ['polling', 'websocket'],
+        transports: ['polling'], // Зөвхөн polling ашиглах
         timeout: 15000,
         forceNew: true,
         reconnection: true,
@@ -70,7 +70,7 @@ class SocketService {
         reconnectionDelayMax: 10000,
         maxReconnectionAttempts: 5,
         autoConnect: true,
-        upgrade: true,
+        upgrade: false, // WebSocket upgrade хориглох
         rememberUpgrade: false
       };
       
