@@ -46,22 +46,32 @@ class SocketService {
     console.log('🔌 User-specific socket холболт үүсгэж байна:', url, 'userId:', userId);
     
     try {
-      // User ID-тай холболт хийх
+      // User ID-тай холболт хийх - WebSocket алдааг багасгах
       const options = userId ? { 
         query: { userId: userId },
-        transports: ['websocket', 'polling'],
-        timeout: 10000, // 10 секунд timeout
+        transports: ['polling', 'websocket'], // Polling-г эхлээд оролдох
+        timeout: 15000, // 15 секунд timeout
         forceNew: true, // Шинэ холболт үүсгэх
         reconnection: true, // Автомат дахин холбогдох
-        reconnectionAttempts: 3, // 3 удаа оролдох
-        reconnectionDelay: 2000 // 2 секунд хүлээх
+        reconnectionAttempts: 5, // 5 удаа оролдох
+        reconnectionDelay: 3000, // 3 секунд хүлээх
+        reconnectionDelayMax: 10000, // Хамгийн ихдээ 10 секунд хүлээх
+        maxReconnectionAttempts: 5, // Хамгийн ихдээ 5 удаа оролдох
+        autoConnect: true, // Автомат холбогдох
+        upgrade: true, // WebSocket upgrade зөвшөөрөх
+        rememberUpgrade: false // Upgrade-г санахгүй байх
       } : {
-        transports: ['websocket', 'polling'],
-        timeout: 10000,
+        transports: ['polling', 'websocket'],
+        timeout: 15000,
         forceNew: true,
         reconnection: true,
-        reconnectionAttempts: 3,
-        reconnectionDelay: 2000
+        reconnectionAttempts: 5,
+        reconnectionDelay: 3000,
+        reconnectionDelayMax: 10000,
+        maxReconnectionAttempts: 5,
+        autoConnect: true,
+        upgrade: true,
+        rememberUpgrade: false
       };
       
       this.socket = io(url, options);
@@ -110,9 +120,19 @@ class SocketService {
       this.isConnected = false;
       
       // WebSocket алдаа бол fallback механизм ашиглах
-      if (error.message.includes('websocket') || error.message.includes('WebSocket')) {
+      if (error.message.includes('websocket') || error.message.includes('WebSocket') || 
+          error.message.includes('connection failed') || error.message.includes('timeout')) {
         console.log('🔄 WebSocket алдаа, polling transport оролдох...');
         this.tryPollingFallback();
+      }
+      
+      // Хэрэглэгчид мэдээлэл өгөх
+      if (typeof window !== 'undefined' && window.electron) {
+        try {
+          window.electron.showNotification('Сүлжээний алдаа', 'Сервертэй холбогдох боломжгүй байна. Дахин оролдох...');
+        } catch (notifError) {
+          console.log('Notification илгээх боломжгүй:', notifError);
+        }
       }
     });
 
@@ -206,9 +226,30 @@ class SocketService {
     if (!this.socket) return;
     
     console.log('🔄 Polling transport оролдох...');
-    this.socket.io.opts.transports = ['polling']; // Зөвхөн polling ашиглах
-    this.socket.io.engine.upgrade = false; // WebSocket upgrade хориглох
-    this.socket.io.open(); // Дахин нээх
+    
+    // Socket-г хаах
+    this.socket.disconnect();
+    
+    // Зөвхөн polling ашиглан дахин холбогдох
+    const pollingOptions = {
+      transports: ['polling'],
+      timeout: 20000,
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 3,
+      reconnectionDelay: 5000,
+      autoConnect: true,
+      upgrade: false, // WebSocket upgrade хориглох
+      rememberUpgrade: false
+    };
+    
+    // Дахин холбогдох
+    setTimeout(() => {
+      const url = this.getApiUrl();
+      this.socket = io(url, pollingOptions);
+      this.setupEventHandlers();
+      console.log('🔄 Polling transport-оор дахин холбогдох оролдлого...');
+    }, 2000);
   }
 
   // ✅ Холболтын алдааны удирдлага
