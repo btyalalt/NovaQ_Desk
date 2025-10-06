@@ -149,7 +149,7 @@ const StatementScreen = ({
             
             return io(socketUrl, {
               query: { userId: userId }, // ✅ User ID-тай query parameter
-              transports: ['websocket', 'polling']
+              transports: ['polling']
             });
           } catch (error) {
             console.error('❌ Socket connection үүсгэхэд алдаа:', error);
