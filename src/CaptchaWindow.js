@@ -42,7 +42,9 @@ async function startCaptchaPolling(isCitizen, captchaUrl) {
             return;
         }
         // ✅ Socket.io холболт хийх (socketService ашиглах)
-        const socket = io(API_CONFIG.BASE_URL);
+        const socket = io(API_CONFIG.BASE_URL,{
+            transports: ['websocket', 'polling']
+        });
         socket.connect();
 
         console.log('🔌 Socket connection status:', socket?.connected);
