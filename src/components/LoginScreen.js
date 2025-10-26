@@ -117,6 +117,22 @@ const LoginScreen = () => {
                 }
                 setUserId(refreshedData.user.username);
                 setIsLoggedIn(true);
+
+                // Send CAPTCHA setup with isCitizen information (auto-refresh)
+                if (refreshedData.customerBankAccount?.IsCitizen !== undefined) {
+                  try {
+                    const socketService = require('../services/socketService').default;
+                    if (socketService && socketService.emitCaptchaSetup) {
+                      socketService.emitCaptchaSetup(refreshedData.user.username, refreshedData.customerBankAccount.IsCitizen);
+                      console.log('📤 CAPTCHA setup илгээгдлээ (auto-refresh дараа):', { 
+                        userOid: refreshedData.user.username, 
+                        isCitizen: refreshedData.customerBankAccount.IsCitizen 
+                      });
+                    }
+                  } catch (error) {
+                    console.error('❌ CAPTCHA setup илгээхэд алдаа (auto-refresh):', error);
+                  }
+                }
                 
                 // Хэрэглэгчийн мэдээлэл амжилттай сэргээгдсэн бол login history хадгалах
                 try {
@@ -170,10 +186,10 @@ const LoginScreen = () => {
                       }
                       
                       const systemResult = await window.electron.invoke('get-system-name');
-                      systemName = systemResult || 'NovaQ_Desk';
+                      systemName = systemResult?.systemName || 'NovaQ_Desk';
                       
                       const deviceResult = await window.electron.invoke('get-device-id');
-                      deviceId = deviceResult || 'Unknown';
+                      deviceId = deviceResult?.deviceId || 'Unknown';
                       
                     } catch (error) {
                       console.log('⚠️ System info авах алдаа:', error);
@@ -184,6 +200,15 @@ const LoginScreen = () => {
                     }
                     
                     // Save login history for auto-refresh
+                    console.log('🔍 Auto-refresh login history data:', {
+                      userName: refreshedData.user.username,
+                      clientIP,
+                      computerName,
+                      systemName,
+                      deviceId,
+                      systemNameType: typeof systemName,
+                      deviceIdType: typeof deviceId
+                    });
                     return authService.saveLoginHistory({
                       userName: refreshedData.user.username,
                       clientIP,
@@ -333,6 +358,15 @@ const LoginScreen = () => {
       localStorage.setItem('savedPassword', password);
       // Нэвтрэх түүх хадгалах
       try {
+        console.log('🔍 Manual login history data:', {
+          userName: username,
+          clientIP,
+          computerName,
+          systemName,
+          deviceId,
+          systemNameType: typeof systemName,
+          deviceIdType: typeof deviceId
+        });
         const result = await authService.saveLoginHistory({
           userName: username,
           clientIP,
@@ -361,6 +395,22 @@ const LoginScreen = () => {
 
       setUserId(found.username);
       setIsLoggedIn(true);
+
+      // Send CAPTCHA setup with isCitizen information
+      if (result.customerBankAccount?.IsCitizen !== undefined) {
+        try {
+          const socketService = require('../services/socketService').default;
+          if (socketService && socketService.emitCaptchaSetup) {
+            socketService.emitCaptchaSetup(found.username, result.customerBankAccount.IsCitizen);
+            console.log('📤 CAPTCHA setup илгээгдлээ (login дараа):', { 
+              userOid: found.username, 
+              isCitizen: result.customerBankAccount.IsCitizen 
+            });
+          }
+        } catch (error) {
+          console.error('❌ CAPTCHA setup илгээхэд алдаа:', error);
+        }
+      }
 
 
       // Check for updates after successful login
