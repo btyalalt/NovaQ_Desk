@@ -214,7 +214,6 @@ app.setName('NovaQ Desktop');
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.novaq.desktop');
 }
-app.disableHardwareAcceleration();
 
 // Get version from package.json first, then environment, then app.getVersion()
 const getAppVersion = () => {
