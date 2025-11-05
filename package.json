@@ -8,7 +8,7 @@
     "start": "cross-env NODE_ENV=production APP_VERSION=1.0.4 electron .",
     "start:prod": "cross-env NODE_ENV=production APP_VERSION=1.0.4 electron .",
     "dev": "cross-env NODE_ENV=development APP_VERSION=1.0.4 electron . --dev --no-asar",
-    "webpack:dev": "node dev-server.js",
+    "webpack:dev": "webpack serve --mode development",
     "webpack:build": "cross-env NODE_ENV=development webpack --mode development",
     "webpack:build:prod": "npm run build:updater && cross-env NODE_ENV=production APP_VERSION=1.0.4 webpack --mode production",
     "react-start": "webpack serve --mode development --open",

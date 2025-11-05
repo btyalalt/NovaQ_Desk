@@ -232,7 +232,8 @@ const getAppVersion = () => {
 
 // Environment-based API Base URL
 const isDevelopment = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
-const API_BASE_URL = isDevelopment ? 'http://localhost:3201' : 'http://103.168.56.34:3101';
+// Backend API server runs on port 3101, webpack dev server runs on port 3201
+const API_BASE_URL = isDevelopment ? 'http://localhost:3101' : 'http://103.168.56.34:3101';
 
 // Portable update system - self-updating executable
 const INSTALL_DIR = process.platform === 'win32'
@@ -1221,10 +1222,73 @@ function createWindow() {
     titleBarStyle: 'default',
   });
   mainWindow.setAlwaysOnTop(true, "screen-saver");
+  
+  // Track load attempts for fallback
+  let loadAttempted = false;
+  let fallbackAttempted = false;
+  
   // Load HTML file
   if (isDevelopment) {
-    // In development, use webpack dev server
-    mainWindow.loadURL('http://localhost:3201');
+    // In development, try webpack dev server first, then fallback to dist
+    const devServerUrl = 'http://localhost:3201';
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    
+    // Check if dist folder exists with index.html
+    const distExists = fs.existsSync(indexPath);
+    
+    // Handle failed load events
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame) return; // Only handle main frame failures
+      
+      // If this is the first load attempt (dev server)
+      if (!loadAttempted && validatedURL === devServerUrl) {
+        loadAttempted = true;
+        console.log('⚠️ Webpack dev server not available:', errorDescription);
+        console.log('📁 Falling back to dist folder...');
+        
+        if (distExists && !fallbackAttempted) {
+          fallbackAttempted = true;
+          console.log('📁 Loading from dist folder:', indexPath);
+          mainWindow.loadFile(indexPath);
+        } else if (!distExists) {
+          console.error('❌ Dist folder not found. Please run: npm run webpack:build');
+          // Show error message after window is ready
+          setTimeout(() => {
+            mainWindow.webContents.executeJavaScript(`
+              document.body.innerHTML = '<div style="padding: 20px; font-family: Arial; text-align: center; background: #f5f5f5; height: 100vh; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                <h2 style="color: #d32f2f;">❌ Build Files Not Found</h2>
+                <p>Please build the application first:</p>
+                <p style="background: #fff; padding: 10px; border-radius: 4px; font-family: monospace;"><code>npm run webpack:build</code></p>
+                <p style="margin-top: 20px;">Or start the dev server:</p>
+                <p style="background: #fff; padding: 10px; border-radius: 4px; font-family: monospace;"><code>npm run webpack:dev</code></p>
+                <p style="margin-top: 20px;">Or use the combined command:</p>
+                <p style="background: #fff; padding: 10px; border-radius: 4px; font-family: monospace;"><code>npm run dev:live</code></p>
+              </div>';
+            `).catch(() => {});
+          }, 500);
+        }
+      } else if (loadAttempted && fallbackAttempted && validatedURL.startsWith('file://')) {
+        // Both attempts failed - dist folder also failed
+        console.error('❌ Both dev server and dist folder failed to load');
+        setTimeout(() => {
+          mainWindow.webContents.executeJavaScript(`
+            document.body.innerHTML = '<div style="padding: 20px; font-family: Arial; text-align: center; background: #f5f5f5; height: 100vh; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+              <h2 style="color: #d32f2f;">⚠️ Development Server Not Available</h2>
+              <p>Please run one of the following commands:</p>
+              <ul style="text-align: left; display: inline-block; background: #fff; padding: 20px; border-radius: 4px;">
+                <li style="margin: 10px 0;"><code>npm run webpack:dev</code> - Start webpack dev server</li>
+                <li style="margin: 10px 0;"><code>npm run webpack:build</code> - Build for development</li>
+                <li style="margin: 10px 0;"><code>npm run dev:live</code> - Start both webpack and electron</li>
+              </ul>
+            </div>';
+          `).catch(() => {});
+        }, 500);
+      }
+    });
+    
+    // Try to load from webpack dev server first
+    console.log('🔍 Attempting to load from webpack dev server:', devServerUrl);
+    mainWindow.loadURL(devServerUrl);
   } else {
     // In production, load HTML from dist folder (built files)
     // In packaged ASAR, main.js is in app.asar/src/ but dist is in app.asar/dist/
@@ -2353,16 +2417,22 @@ async function checkDatabaseStatus() {
     
     // Use built-in fetch if available, otherwise use node-fetch
     let fetch;
-    if (globalThis.fetch) {
+    let supportsAbortSignal = false;
+    
+    if (globalThis.fetch && typeof AbortSignal !== 'undefined') {
       fetch = globalThis.fetch;
+      supportsAbortSignal = true;
     } else {
       try {
         const { default: nodeFetch } = await import('node-fetch');
         fetch = nodeFetch;
+        // node-fetch v2 supports AbortController
+        supportsAbortSignal = true;
       } catch (error) {
         console.log('ℹ️ Using built-in https module for network requests');
         // Use https module as fallback
         const https = require('https');
+        supportsAbortSignal = false;
         
         fetch = (urlString, options = {}) => {
           return new Promise((resolve, reject) => {
@@ -2372,7 +2442,8 @@ async function checkDatabaseStatus() {
               port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
               path: parsedUrl.pathname + parsedUrl.search,
               method: options.method || 'GET',
-              headers: options.headers || {}
+              headers: options.headers || {},
+              timeout: 5000 // 5 second timeout for https module
             };
             
             const req = https.request(reqOptions, (res) => {
@@ -2390,6 +2461,26 @@ async function checkDatabaseStatus() {
             });
             
             req.on('error', reject);
+            req.on('timeout', () => {
+              req.destroy();
+              reject(new Error('Request timeout'));
+            });
+            
+            // Handle abort signal for https module
+            if (options.signal && options.signal.aborted) {
+              req.destroy();
+              reject(new Error('Request aborted'));
+            } else if (options.signal) {
+              const checkAbort = () => {
+                if (options.signal.aborted) {
+                  req.destroy();
+                  reject(new Error('Request aborted'));
+                }
+              };
+              const abortInterval = setInterval(checkAbort, 100);
+              req.on('close', () => clearInterval(abortInterval));
+            }
+            
             if (options.body) req.write(options.body);
             req.end();
           });
@@ -2397,18 +2488,29 @@ async function checkDatabaseStatus() {
       }
     }
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-    
-    const response = await fetch(`${API_BASE_URL}/api/version/database-status`, {
+    const fetchOptions = {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json'
-      },
-      signal: controller.signal
-    });
+      }
+    };
     
-    clearTimeout(timeoutId);
+    // Add timeout using AbortController only if supported
+    let timeoutId;
+    if (supportsAbortSignal && typeof AbortController !== 'undefined') {
+      const controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      fetchOptions.signal = controller.signal;
+    } else {
+      // Fallback: use Promise.race for timeout
+      timeoutId = setTimeout(() => {}, 0); // Dummy timeout for cleanup
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/api/version/database-status`, fetchOptions);
+    
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
     
 
     if (!response.ok) {
@@ -2436,7 +2538,7 @@ async function checkDatabaseStatus() {
     console.log('❌ Database status check error:', error.message);
     
     let errorMessage = error.message;
-    if (error.message.includes('ETIMEDOUT')) {
+    if (error.message.includes('ETIMEDOUT') || error.message.includes('timeout')) {
       errorMessage = 'Server is not responding. Please check if the server is running.';
     } else if (error.message.includes('ECONNREFUSED')) {
       errorMessage = 'Connection refused. Server may be down or not accessible.';
@@ -2446,6 +2548,8 @@ async function checkDatabaseStatus() {
       errorMessage = 'Network module not available. Please restart the application.';
     } else if (error.message.includes('WRONG_VERSION_NUMBER') || error.message.includes('SSL routines')) {
       errorMessage = 'SSL connection error. Server may be using different protocol.';
+    } else if (error.message.includes('aborted') || error.message.includes('AbortController')) {
+      errorMessage = 'Request timeout. Please check your network connection.';
     }
     
     return {

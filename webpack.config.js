@@ -73,11 +73,21 @@ module.exports = {
   ],
   devServer: {
     static: {
-      directory: path.join(__dirname, 'src'),
+      directory: path.join(__dirname, 'dist'),
     },
     compress: true,
-    port: 3101,
+    port: 3201,
     hot: true,
-    open: true
+    open: false,
+    historyApiFallback: true,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+    },
+    client: {
+      overlay: {
+        errors: true,
+        warnings: false,
+      },
+    },
   }
 };
