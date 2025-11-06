@@ -9,7 +9,7 @@ if (process.platform === 'win32') {
     console.log('🔧 Windows 7 detected - applying compatibility switches');
     
     // Disable problematic features for Windows 7
-    app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors,SameSiteByDefaultCookies,WebRTC');
+    app.commandLine.appendSwitch('disable-features', 'NetworkService,NetworkServiceInProcess');
     app.commandLine.appendSwitch('disable-web-security');
     app.commandLine.appendSwitch('disable-site-isolation-trials');
     app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor');
@@ -1222,30 +1222,30 @@ function createWindow() {
     titleBarStyle: 'default',
   });
   mainWindow.setAlwaysOnTop(true, "screen-saver");
-  
+
   // Track load attempts for fallback
   let loadAttempted = false;
   let fallbackAttempted = false;
-  
+
   // Load HTML file
   if (isDevelopment) {
     // In development, try webpack dev server first, then fallback to dist
     const devServerUrl = 'http://localhost:3201';
     const indexPath = path.join(__dirname, '../dist/index.html');
-    
+
     // Check if dist folder exists with index.html
     const distExists = fs.existsSync(indexPath);
-    
+
     // Handle failed load events
     mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (!isMainFrame) return; // Only handle main frame failures
-      
+
       // If this is the first load attempt (dev server)
       if (!loadAttempted && validatedURL === devServerUrl) {
         loadAttempted = true;
         console.log('⚠️ Webpack dev server not available:', errorDescription);
         console.log('📁 Falling back to dist folder...');
-        
+
         if (distExists && !fallbackAttempted) {
           fallbackAttempted = true;
           console.log('📁 Loading from dist folder:', indexPath);
@@ -1285,7 +1285,7 @@ function createWindow() {
         }, 500);
       }
     });
-    
+
     // Try to load from webpack dev server first
     console.log('🔍 Attempting to load from webpack dev server:', devServerUrl);
     mainWindow.loadURL(devServerUrl);
@@ -2418,7 +2418,7 @@ async function checkDatabaseStatus() {
     // Use built-in fetch if available, otherwise use node-fetch
     let fetch;
     let supportsAbortSignal = false;
-    
+
     if (globalThis.fetch && typeof AbortSignal !== 'undefined') {
       fetch = globalThis.fetch;
       supportsAbortSignal = true;
@@ -2433,7 +2433,7 @@ async function checkDatabaseStatus() {
         // Use https module as fallback
         const https = require('https');
         supportsAbortSignal = false;
-        
+
         fetch = (urlString, options = {}) => {
           return new Promise((resolve, reject) => {
             const parsedUrl = new URL(urlString);
@@ -2465,7 +2465,7 @@ async function checkDatabaseStatus() {
               req.destroy();
               reject(new Error('Request timeout'));
             });
-            
+
             // Handle abort signal for https module
             if (options.signal && options.signal.aborted) {
               req.destroy();
@@ -2480,7 +2480,7 @@ async function checkDatabaseStatus() {
               const abortInterval = setInterval(checkAbort, 100);
               req.on('close', () => clearInterval(abortInterval));
             }
-            
+
             if (options.body) req.write(options.body);
             req.end();
           });
@@ -2494,7 +2494,7 @@ async function checkDatabaseStatus() {
         'Content-Type': 'application/json'
       }
     };
-    
+
     // Add timeout using AbortController only if supported
     let timeoutId;
     if (supportsAbortSignal && typeof AbortController !== 'undefined') {
@@ -2507,7 +2507,7 @@ async function checkDatabaseStatus() {
     }
     
     const response = await fetch(`${API_BASE_URL}/api/version/database-status`, fetchOptions);
-    
+
     if (timeoutId) {
       clearTimeout(timeoutId);
     }
