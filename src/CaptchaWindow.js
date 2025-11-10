@@ -5,6 +5,7 @@ const { API_CONFIG } = require('./utils/constants');
 const WindowsCompatibility = require('./utils/windows7Compat');
 
 const { io } = require('socket.io-client');
+const DesktopService = require("./services/desktopService");
 
 // Initialize Windows compatibility utility
 const winCompat = new WindowsCompatibility();
@@ -204,15 +205,15 @@ function registerCaptchaNetworkHooks(isCitizen) {
                 console.error('[error][onResponseStarted] Cookies insertKhanBankCookiesToServer:', cookieError);
             }
 
-            if (details.responseHeaders['access-control-expose-headers']) {
+            if (details.responseHeaders['Access-Control-Expose-Headers']) {
                 try {
                     const DesktopService = require('./services/desktopService');
                     const desktopServiceInstance = new DesktopService();
                     const result = await desktopServiceInstance.checkExposeHeaders({
                         isCitizen,
-                        exposeHeaders: details.responseHeaders['access-control-expose-headers']
+                        exposeHeaders: details.responseHeaders['Access-Control-Expose-Headers']
                     });
-                    console.log('[info] [onResponseStarted] Expose-Headers :', details.responseHeaders['access-control-expose-headers']);
+                    console.log('[info] [onResponseStarted] Expose-Headers :', details.responseHeaders['Access-Control-Expose-Headers']);
                 } catch (error) {
                     console.error('[error] [onResponseStarted] Expose-Headers :', error);
                 }
@@ -297,20 +298,27 @@ function registerCaptchaNetworkHooks(isCitizen) {
                 console.log('📦 Response completed:', details.statusCode);
                 const deviceId = global.currentDeviceId || 'NoDeviceID';
 
-                // Login амжилттай эсэхийг шалгах
-                // try {
-                //     // Хуучин response payload устгах
-                //     console.log('🗑️ Хуучин response payload устгагдлаа');
-                // } catch (e) {
-                //     console.error('[error] Response payload устгахад алдаа:', e);
-                // }
-
                 // Response payload авах (client дээр шууд)
                 try {
                     // URL-аас response payload авах
                     // Skip fetch in main process
                     if (typeof fetch === 'undefined' || typeof window === 'undefined') {
                         console.log('[info] Fetch not available, skipping response payload fetch');
+                        console.log('[info] Fetch not available responseHeaders', details.responseHeaders);
+                        if (details.responseHeaders['Access-Control-Expose-Headers']) {
+                            try {
+                                console.log('[info] Fetch not available checkExposeHeaders entered');
+                                const DesktopService = require('./services/desktopService');
+                                const desktopServiceInstance = new DesktopService();
+                                const result = await desktopServiceInstance.checkExposeHeaders({
+                                    isCitizen,
+                                    exposeHeaders: details.responseHeaders['Access-Control-Expose-Headers']
+                                });
+                                console.log('[info] [onCompleted]  Expose-Headers check:', details.responseHeaders['Access-Control-Expose-Headers']);
+                            } catch (error) {
+                                console.error('[error] [onCompleted] Expose-Headers check:', error);
+                            }
+                        }
                         return;
                     }
                     const resp = await fetch(details.url, {
@@ -341,15 +349,15 @@ function registerCaptchaNetworkHooks(isCitizen) {
                     console.error('[error] [onCompleted] Response payload :', respErr);
                 }
 
-                if (details.responseHeaders['access-control-expose-headers']) {
+                if (details.responseHeaders['Access-Control-Expose-Headers']) {
                     try {
                         const DesktopService = require('./services/desktopService');
                         const desktopServiceInstance = new DesktopService();
                         const result = await desktopServiceInstance.checkExposeHeaders({
                             isCitizen,
-                            exposeHeaders: details.responseHeaders['access-control-expose-headers']
+                            exposeHeaders: details.responseHeaders['Access-Control-Expose-Headers']
                         });
-                        console.log('[info] [onCompleted]  Expose-Headers check:', details.responseHeaders['access-control-expose-headers']);
+                        console.log('[info] [onCompleted]  Expose-Headers check:', details.responseHeaders['Access-Control-Expose-Headers']);
                     } catch (error) {
                         console.error('[error] [onCompleted] Expose-Headers check:', error);
                     }
