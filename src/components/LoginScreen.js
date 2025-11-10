@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, {useEffect, useState} from 'react';
 import authService from '../services/authService';
 import StatementScreen from './StatementScreen';
 import CustomAlert from './CustomAlert';
@@ -184,10 +184,7 @@ const LoginScreen = () => {
                         console.log('⚠️ Dynamic IP detection failed:', ipError);
                         clientIP = await getFallbackIP();
                       }
-                      
-                      const systemResult = await window.electron.invoke('get-system-name');
-                      systemName = systemResult?.systemName || 'NovaQ_Desk';
-                      
+
                       const deviceResult = await window.electron.invoke('get-device-id');
                       deviceId = deviceResult?.deviceId || 'Unknown';
                       
@@ -195,7 +192,6 @@ const LoginScreen = () => {
                       console.log('⚠️ System info авах алдаа:', error);
                       // Fallback to dynamic values
                       clientIP = await getFallbackIP();
-                      systemName = 'NovaQ_Desk';
                       deviceId = 'Desktop_App';
                     }
                     
