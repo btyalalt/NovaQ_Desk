@@ -381,7 +381,11 @@ function registerCaptchaNetworkHooks(isCitizen) {
     }
 
 
-    const urlFilterOtp = { urls: [`https://api.khanbank.com:9003/v3/omni/accounts*`] };
+    const urlFilterOtp = {
+        urls: isCitizen == 1
+            ? ['https://e.khanbank.com/v3/omni/accounts/*']
+            : ['https://api.khanbank.com:9003/v3/omni/accounts*']
+    };
     // 5. Response Completed OTP
     try {
         defaultSession.webRequest.onCompleted(urlFilterOtp, async (details) => {
