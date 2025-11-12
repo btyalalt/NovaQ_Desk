@@ -508,16 +508,11 @@ class CaptchaWindowManager {
         }
 
         // URL тохируулах - Windows 7 compatibility
-        let captchaUrl;
-        if (winCompat && winCompat.isWindows7) {
-            // Windows 7 дээр corp.khanbank.com холболт асуудалтай тул e.khanbank.com ашиглах
-            console.log('[settings] Windows 7: Using e.khanbank.com for better compatibility');
-            captchaUrl = 'https://e.khanbank.com/auth/login';
-        } else {
-            captchaUrl = isCitizen
-                ? 'https://e.khanbank.com/auth/login'
-                : 'https://corp.khanbank.com/auth/login';
-        }
+        let captchaUrl=isCitizen
+        ? 'https://e.khanbank.com/auth/login'
+        : 'https://corp.khanbank.com/auth/login';
+
+       
 
         const customHtmlPath = path.join(__dirname, 'captcha.html');
         console.log('[info] Windows compatibility needed:', winCompat.needsCompatibility());
