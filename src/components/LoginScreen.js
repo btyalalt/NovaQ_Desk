@@ -195,24 +195,9 @@ const LoginScreen = () => {
                       deviceId = 'Desktop_App';
                     }
                     
-                    // Save login history for auto-refresh
-                    console.log('🔍 Auto-refresh login history data:', {
-                      userName: refreshedData.user.username,
-                      clientIP,
-                      computerName,
-                      systemName,
-                      deviceId,
-                      systemNameType: typeof systemName,
-                      deviceIdType: typeof deviceId
-                    });
-                    return authService.saveLoginHistory({
-                      userName: refreshedData.user.username,
-                      clientIP,
-                      computerName,
-                      systemName,
-                      deviceId,
-                      DesktopVersion: packageJson.version
-                    });
+                    // Auto-refresh хийхэд login history хадгалахгүй (зөвхөн manual login хийхэд хадгална)
+                    // Login history-г зөвхөн handleLogin функц дотор хадгална
+                    console.log('🔄 Auto-refresh хийж байна, login history хадгалахгүй (зөвхөн manual login хийхэд хадгална)');
                   }).catch(function(error) {
                     console.error('❌ Login history хадгалахад алдаа:', error);
                   });
@@ -504,7 +489,7 @@ const LoginScreen = () => {
           style={{ WebkitAppRegion: 'drag' }}
         >
           <span className="title-bar-content">
-            <img src="../assets/icon.ico" alt="NovaQ" className="title-bar-icon" />
+            <img src="assets/icon.ico" alt="NovaQ" className="title-bar-icon" onError={(e) => { e.target.style.display = 'none'; }} />
             NovaQ Desk
           </span>
           <div className="title-bar-controls" style={{ WebkitAppRegion: 'no-drag' }}>

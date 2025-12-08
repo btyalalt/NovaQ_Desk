@@ -27,9 +27,14 @@ const StatementScreen = ({
   const [newTransactionsCount, setNewTransactionsCount] = useState(0);
   const [animatedTransactions, setAnimatedTransactions] = useState(new Set());
   const [tokenResult, setTokenResult] = useState(null);
+  const [showAmount, setShowAmount] = useState(false); // Дансны дүнг нууцлах/харуулах
 
   // Socket reference
   const socketRef = useRef(null);
+  // Track if fetchAccountAndAmount is currently running to prevent duplicate calls
+  const fetchingRef = useRef(false);
+  // Polling interval reference
+  const pollingIntervalRef = useRef(null);
 
   // Transaction-уудын нийлбэрийг тооцоолох функц
   const calculateTotalAmount = (transactions) => {
@@ -43,6 +48,9 @@ const StatementScreen = ({
   // Socket disconnect функц
   const disconnectAllConnections = () => {
     console.log('🔌 Бүх connection-уудыг зогсоож байна...');
+
+    // Polling зогсоох
+    stopPolling();
 
     // Socket disconnect
     if (socketRef.current) {
@@ -165,6 +173,9 @@ const StatementScreen = ({
             console.log('✅ User-specific socket холбогдлоо:', socketRef.current.id);
             setSocketConnected(true);
 
+            // Socket холбогдсон үед polling зогсоох
+            stopPolling();
+
             // userId-тай room-д нэгдэх (server талд автоматаар join хийгддэг)
             socketRef.current.emit('joinRoom', { userId });
             console.log('🏠 User-specific room-д нэгдлээ:', userId);
@@ -182,11 +193,20 @@ const StatementScreen = ({
           socketRef.current.on('disconnect', () => {
             console.log('❌ Socket холболт тасарлаа');
             setSocketConnected(false);
+            
+            // Socket салсан үед polling асаах
+            if (!pollingIntervalRef.current) {
+              console.log('▶️ Socket салсан тул polling асаж байна...');
+              startPolling();
+            }
           });
 
           // Шинэ transaction-ууд ирэх үед (backend дээр filter хийгдсэн)
           socketRef.current.on('newTransactions', (data) => {
             console.log('🆕 User-specific socket-оор шинэ transaction-ууд ирлээ:', data);
+            
+            // Socket-оор transaction ирээд байвал polling зогсоох
+            stopPolling();
 
             // User-specific filter шалгах
             if (data.data && data.data.userOid && data.data.userOid !== userId) {
@@ -297,6 +317,8 @@ const StatementScreen = ({
       if (socketSetupTimeout) {
         clearTimeout(socketSetupTimeout);
       }
+      // Polling зогсоох
+      stopPolling();
       if (socketRef.current) {
         console.log('🔌 Socket холболт хааж байна');
         try {
@@ -342,6 +364,13 @@ const StatementScreen = ({
 
   // Fetch account and amount with debounce
   const fetchAccountAndAmount = async () => {
+    // Prevent duplicate concurrent calls
+    if (fetchingRef.current) {
+      console.log('⚠️ fetchAccountAndAmount аль хэдийн ажиллаж байна, алгасах...');
+      return;
+    }
+    
+    fetchingRef.current = true;
     try {
       console.log('🔍 fetchAccountAndAmount дуудагдаж байна:', { customerBankAccount });
       const transactionsResult = await getTransactions();
@@ -374,6 +403,8 @@ const StatementScreen = ({
     } catch (transactionError) {
       console.error('❌ getTransactions алдаа:', transactionError);
       setErrorMessage('Гүйлгээний мэдээлэл авахад алдаа гарлаа');
+    } finally {
+      fetchingRef.current = false;
     }
   };
 
@@ -382,13 +413,20 @@ const StatementScreen = ({
     setErrorMessage('');
 
     try {
-      console.log('🔍 fetchAccountAndAmount дуудагдаж байна:', { customerBankAccount });
+      console.log('🔄 tokenRefresh дуудагдаж байна:', { customerBankAccount });
       // 🚀 getTokenAndStore дуудах
       if (customerBankAccount?.bankUserName && customerBankAccount?.bankPassword) {
         console.log('🔑 getTokenAndStore дуудаж байна...');
         const tokenResult = await getTokenAndStore(customerBankAccount.customerId || customerBankAccount.CustomerId);
         console.log('🔍 tokenResult:', tokenResult);
         setTokenResult(tokenResult); // State-д хадгалах
+        
+        // If this was a duplicate call, skip fetching transactions
+        if (tokenResult.isDuplicate) {
+          console.log('⚠️ Duplicate getTokenAndStore call detected, skipping fetchAccountAndAmount');
+          return;
+        }
+        
         if (tokenResult.success) {
           fetchAccountAndAmount();
         } else {
@@ -406,8 +444,8 @@ const StatementScreen = ({
       }
 
     } catch (error) {
-      console.error('❌ fetchAccountAndAmount алдаа:', error);
-      setErrorMessage('Гүйлгээний мэдээлэл авахад алдаа гарлаа');
+      console.error('❌ tokenRefresh алдаа:', error);
+      setErrorMessage('Token шинэчлэхэд алдаа гарлаа');
     } finally {
       setLoading(false);
     }
@@ -423,6 +461,48 @@ const StatementScreen = ({
       setErrorMessage('CAPTCHA дуудахад алдаа гарлаа');
     }
   }
+
+  // Polling функцийг эхлүүлэх (socket салсан үед)
+  const startPolling = () => {
+    // Хэрэв socket холбогдсон байвал polling эхлүүлэхгүй
+    if (socketConnected) {
+      console.log('⚠️ Socket холбогдсон байгаа тул polling эхлүүлэхгүй');
+      return;
+    }
+
+    // Хэрэв polling аль хэдийн ажиллаж байвал шинээр эхлүүлэхгүй
+    if (pollingIntervalRef.current) {
+      console.log('⚠️ Polling аль хэдийн ажиллаж байна');
+      return;
+    }
+
+    console.log('▶️ Polling эхлүүлж байна (30 секунд тутамд)...');
+    
+    // Эхлээд нэг удаа шууд дуудах
+    fetchAccountAndAmount();
+
+    // Дараа нь 30 секунд тутамд давтах
+    pollingIntervalRef.current = setInterval(() => {
+      // Socket холбогдсон эсэхийг дахин шалгах
+      if (!socketConnected && !fetchingRef.current) {
+        console.log('🔄 Polling: Transaction-уудыг шалгаж байна...');
+        fetchAccountAndAmount();
+      } else if (socketConnected) {
+        console.log('⏸️ Socket холбогдсон тул polling зогсоож байна...');
+        stopPolling();
+      }
+    }, 30000); // 30 секунд
+  }
+
+  // Polling функцийг зогсоох
+  const stopPolling = () => {
+    if (pollingIntervalRef.current) {
+      console.log('⏸️ Polling зогсоож байна...');
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }
+
   // Handle refresh
   const handleRefresh = async () => {
     if (refreshing) return;
@@ -465,6 +545,14 @@ const StatementScreen = ({
     const initializeData = async () => {
       try {
         await tokenRefresh();
+        
+        // Socket холбогдохгүй бол polling эхлүүлэх
+        // Socket connect event дээр polling зогсоох тул энд эхлүүлэх
+        setTimeout(() => {
+          if (!socketConnected) {
+            startPolling();
+          }
+        }, 2000); // 2 секундын дараа шалгах (socket холбогдохыг хүлээх)
       } catch (error) {
         console.error('❌ Initial data fetch алдаа:', error);
       }
@@ -487,20 +575,22 @@ const StatementScreen = ({
         {/* Header */}
         <div className="mobile-header">
           <div className="control-buttons">
-            <span className="back-button" onClick={handleBack}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="9" cy="9" r="9"
-                  fill="white" fillOpacity="0.15" />
+            <div className="right-buttons">
+              <span className="back-button" onClick={handleBack}>
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="9" cy="9" r="9"
+                    fill="white" fillOpacity="0.15" />
 
-                <path d="M12 9H6M6 9L9 6M6 9L9 12" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-            <span className="control-button" onClick={handleQuitApp}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="9" cy="9" r="9" fill="white" fillOpacity="0.15" />
-                <path d="M5.5 5.5L12.5 12.5M12.5 5.5L5.5 12.5" stroke="white" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            </span>
+                  <path d="M12 9H6M6 9L9 6M6 9L9 12" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+              <span className="control-button" onClick={handleQuitApp}>
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="9" cy="9" r="9" fill="white" fillOpacity="0.15" />
+                  <path d="M5.5 5.5L12.5 12.5M12.5 5.5L5.5 12.5" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+            </div>
           </div>
           <div>
             <div className="user-greeting">
@@ -529,8 +619,37 @@ const StatementScreen = ({
         {/* Account box */}
         <div className="account-box">
           <span className="account-number">{customerBankAccount?.bankAccountNum || 'Данс олдсонгүй'}</span>
-          <span className="account-amount">
-            {`₮ ${(typeof totalAmount === 'number' ? totalAmount : 0).toLocaleString('mn-MN')}`}
+          <span className="account-amount" style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+            <span style={{ userSelect: 'none' }}>
+              {showAmount 
+                ? `₮ ${(typeof totalAmount === 'number' ? totalAmount : 0).toLocaleString('mn-MN')}`
+                : '₮ ••••••'
+              }
+            </span>
+            <button 
+              type="button"
+              className="Income" 
+              onClick={() => setShowAmount(s => !s)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                margin: 0,
+                cursor: 'pointer',
+                outline: 'none',
+                boxShadow: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px'
+              }}
+              title={showAmount ? 'Нуух' : 'Харах'}
+            >
+              <svg width="24" height="24" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 6V12M9 6L6 9M9 6L12 9" stroke="#0076FF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </span>
         </div>
 

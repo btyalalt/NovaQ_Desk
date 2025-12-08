@@ -379,7 +379,7 @@ class AuthService {
         console.log('⚠️ No auth token available for refresh');
         return null;
       }
-      console.log('🔍 token:', token);
+      // Token-ийг apiService.getTokenAndStore дээр хэвлэнэ, энд давхар хэвлэхгүй
       
       // Create AbortController for timeout
       const controller = new AbortController();

@@ -126,7 +126,23 @@ const getJWTTokenFromServer = async (username, password) => {
 };
 
 // Get token and store
+// Track if getTokenAndStore is currently running to prevent duplicate calls
+let getTokenAndStoreRunning = false;
+
 const getTokenAndStore = async (userOid) => {
+  // Prevent duplicate concurrent calls
+  if (getTokenAndStoreRunning) {
+    console.log('⚠️ getTokenAndStore аль хэдийн ажиллаж байна, алгасах...');
+    return {
+      success: false,
+      token: null,
+      user: null,
+      errorMessage: 'Token авах процесс аль хэдийн ажиллаж байна',
+      isDuplicate: true
+    };
+  }
+  
+  getTokenAndStoreRunning = true;
   try {
     console.log('🔍 getTokenAndStore дуудагдаж байна:', { userOid });
 
@@ -135,7 +151,10 @@ const getTokenAndStore = async (userOid) => {
 
     // JWT token авах (helper function ашиглах)
     const jwtToken = await getJWTToken();
-    console.log('jwtToken', jwtToken);
+    // Token-ийг зөвхөн development mode-д хэвлэх (production-д console.log арилна)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔑 jwtToken:', jwtToken ? `${jwtToken.substring(0, 50)}...` : 'null');
+    }
     if (!jwtToken) {
       return {
         success: false,
@@ -280,6 +299,8 @@ const getTokenAndStore = async (userOid) => {
       user: null,
       errorMessage: error.message || 'Токен авахад алдаа гарлаа'
     };
+  } finally {
+    getTokenAndStoreRunning = false;
   }
 };
 

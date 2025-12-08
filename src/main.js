@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 
 // Windows 7 compatibility command line switches
 if (process.platform === 'win32') {
@@ -1457,6 +1457,32 @@ autoUpdater.on('update-downloaded', (info) => {
 
 // App event handlers
 app.whenReady().then(() => {
+  // Configure CSP for development mode (allow unsafe-eval for HMR)
+  if (isDevelopment) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      const responseHeaders = { ...details.responseHeaders };
+      
+      // Remove any existing CSP headers (case-insensitive)
+      Object.keys(responseHeaders).forEach(key => {
+        if (key.toLowerCase() === 'content-security-policy') {
+          delete responseHeaders[key];
+        }
+      });
+      
+      // Set new CSP header with unsafe-eval for HMR
+      responseHeaders['Content-Security-Policy'] = [
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https:; " +
+        "connect-src 'self' http://localhost:3101 http://103.168.56.34:3101 https://desktop-f96376.gitlab.io/ ws://localhost:3101 ws://103.168.56.34:3101 wss://103.168.56.34:3101 https://api.ipify.org;"
+      ];
+      
+      callback({ responseHeaders });
+    });
+    console.log('🔒 CSP configured for development (unsafe-eval enabled for HMR)');
+  }
+  
   createWindow();
   
   // Set max listeners to prevent warning

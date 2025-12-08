@@ -2,6 +2,7 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
+const TerserPlugin = require('terser-webpack-plugin');
 
 module.exports = {
   mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
@@ -51,6 +52,19 @@ module.exports = {
       "http": false
     }
   },
+  optimization: {
+    minimize: process.env.NODE_ENV === 'production',
+    minimizer: process.env.NODE_ENV === 'production' ? [
+      new TerserPlugin({
+        terserOptions: {
+          compress: {
+            drop_console: true, // Production-д console.log-уудыг арилгах
+            drop_debugger: true,
+          },
+        },
+      }),
+    ] : [],
+  },
   plugins: [
     new HtmlWebpackPlugin({
       template: './src/index.html',
@@ -67,7 +81,9 @@ module.exports = {
       patterns: [
         { from: 'src/preload.js', to: 'preload.js' },
         { from: 'assets/favicon.svg', to: 'favicon.svg' },
-        { from: 'assets/icon.ico', to: 'favicon.ico' }
+        { from: 'assets/icon.ico', to: 'favicon.ico' },
+        { from: 'assets/icon.ico', to: 'assets/icon.ico' },
+        { from: 'assets/Logopng.png', to: 'assets/Logopng.png' }
       ]
     })
   ],
