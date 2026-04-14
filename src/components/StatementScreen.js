@@ -49,7 +49,7 @@ const StatementScreen = ({
   // Socket disconnect функц
   const disconnectAllConnections = () => {
     console.log('🔌 Бүх connection-уудыг зогсоож байна...');
-
+    captchaOpenRef.current = false;
     // Polling зогсоох
     stopPolling();
 
@@ -99,7 +99,6 @@ const StatementScreen = ({
 
   // Back button handler
   const handleBack = async () => {
-
     try {
       await window.electron.invoke('close-captcha-window');
     } catch (error) {
