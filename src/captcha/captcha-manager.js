@@ -1,15 +1,11 @@
 // ============================================================
 // captcha/captcha-manager.js — CAPTCHA цонхны lifecycle
 // ============================================================
-// Зөвхөн BrowserWindow үүсгэх/хаах.
-// Network hooks → CookieCollector
-// Socket → CaptchaSocket
-
-const { BrowserWindow, session } = require('electron');
+const { BrowserWindow } = require('electron');
 const path = require('path');
-const WindowsCompatibility = require('./utils/windows7Compat');
-const CookieCollector = require('./socket/cookie-collector');
-const CaptchaSocket = require('./socket/captcha-socket');
+const WindowsCompatibility = require('../utils/windows7Compat');
+const CookieCollector = require('../socket/cookie-collector');
+const CaptchaSocket = require('../socket/captcha-socket');
 
 const winCompat = new WindowsCompatibility();
 
@@ -23,7 +19,7 @@ class CaptchaManager {
     /**
      * CAPTCHA цонх нээх
      * @param {number} isCitizen - 0: байгууллага, 1: иргэн
-     * @param {BrowserWindow|null} mainWindow - Үндсэн цонх
+     * @param {BrowserWindow|null} mainWindow
      */
     async open(isCitizen, mainWindow = null) {
         console.log('[CaptchaManager] open:', { isCitizen });

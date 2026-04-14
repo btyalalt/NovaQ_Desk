@@ -1,11 +1,12 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import './StatementScreen.css';
-import { getTokenAndStore, getTransactions } from '../services/apiService';
+import {getTokenAndStore, getTransactions} from '../services/apiService';
 import io from 'socket.io-client';
 import DesktopService from '../services/desktopService';
-const desktopService = new DesktopService();
-import { API_CONFIG } from '../utils/constants';
+import {API_CONFIG} from '../utils/constants';
 import authService from '../services/authService';
+
+const desktopService = new DesktopService();
 
 const StatementScreen = ({
   onBack,
@@ -298,14 +299,13 @@ const StatementScreen = ({
             if (result.success && result.captchaDone) {
               console.log('✅ CAPTCHA амжилттай болсон! fetchAccountAndAmount дуудаж байна...');
 
-              try {
+                // *** ЧУХАЛ: captchaOpenRef-г цэвэрлэх ***
+                captchaOpenRef.current = false;
+
                 // 2 секундын дараа fetchAccountAndAmount дуудах (CAPTCHA cookies хадгалагдахыг хүлээх)
                 setTimeout(async () => {
                   await tokenRefresh();
                 }, 2000);
-              } catch (error) {
-                console.error('❌ CAPTCHA success дараах fetchAccountAndAmount алдаа:', error);
-              }
             }
           });
         });
@@ -362,137 +362,211 @@ const StatementScreen = ({
     }
   }, []);
 
-  // Fetch account and amount with debounce
-  const fetchAccountAndAmount = async () => {
-    // Prevent duplicate concurrent calls
-    if (fetchingRef.current) {
-      console.log('⚠️ fetchAccountAndAmount аль хэдийн ажиллаж байна, алгасах...');
-      return;
-    }
-    
-    fetchingRef.current = true;
-    try {
-      console.log('🔍 fetchAccountAndAmount дуудагдаж байна:', { customerBankAccount });
-      const transactionsResult = await getTransactions();
-      // CAPTCHA шаардлагатай эсэхийг шалгах
-      if (transactionsResult.needCaptcha) {
-
-        showCaptchaWindow();
-        return;
-      }
-
-      if (transactionsResult.data && transactionsResult.data.transactions) {
-        console.log('✅ Transaction data амжилттай авлаа:', {
-          count: transactionsResult.data.transactions.length
-        });
-        setTransactions(transactionsResult.data.transactions);
-
-        // Transaction-уудын нийлбэрийг тооцоолох
-        const total = calculateTotalAmount(transactionsResult.data.transactions);
-        setTotalAmount(total);
-        console.log('💰 Transaction нийлбэр:', total.toLocaleString());
-
-        // Account amount-ыг тохируулах
-        if (transactionsResult.data.account) {
-          setAmount(`₮ ${transactionsResult.data.account.toLocaleString()}`);
+// Fetch account and amount — CAPTCHA нээлттэй бол алгасна
+    const fetchAccountAndAmount = async () => {
+        // CAPTCHA нээлттэй үед дуудахгүй
+        if (captchaOpenRef.current) {
+            console.log('⚠️ CAPTCHA нээлттэй байгаа тул fetchAccountAndAmount алгасах');
+            return;
         }
-      } else {
-        console.log('⚠️ Transaction data байхгүй байна');
-        setTotalAmount(0);
-      }
-    } catch (transactionError) {
-      console.error('❌ getTransactions алдаа:', transactionError);
-      setErrorMessage('Гүйлгээний мэдээлэл авахад алдаа гарлаа');
-    } finally {
-      fetchingRef.current = false;
-    }
-  };
 
-  const tokenRefresh = async () => {
-    setLoading(true);
-    setErrorMessage('');
-
-    try {
-      console.log('🔄 tokenRefresh дуудагдаж байна:', { customerBankAccount });
-      // 🚀 getTokenAndStore дуудах
-      if (customerBankAccount?.bankUserName && customerBankAccount?.bankPassword) {
-        console.log('🔑 getTokenAndStore дуудаж байна...');
-        const tokenResult = await getTokenAndStore(customerBankAccount.customerId || customerBankAccount.CustomerId);
-        console.log('🔍 tokenResult:', tokenResult);
-        setTokenResult(tokenResult); // State-д хадгалах
-        
-        // If this was a duplicate call, skip fetching transactions
-        if (tokenResult.isDuplicate) {
-          console.log('⚠️ Duplicate getTokenAndStore call detected, skipping fetchAccountAndAmount');
-          return;
+        if (fetchingRef.current) {
+            console.log('⚠️ fetchAccountAndAmount аль хэдийн ажиллаж байна');
+            return;
         }
-        
-        if (tokenResult.success) {
-          fetchAccountAndAmount();
-        } else {
-          console.log('❌ Token авахад алдаа:', tokenResult.errorMessage);
 
-          // Token авахад алдаа бол CAPTCHA дуудах
-          if (tokenResult.needCaptcha) {
-            showCaptchaWindow();
-          }
-          setErrorMessage(tokenResult.errorMessage || 'Token авахад алдаа гарлаа');
+        fetchingRef.current = true;
+        try {
+            console.log('🔍 fetchAccountAndAmount дуудагдаж байна');
+            const response = await getTransactions();
+
+            if (response.needCaptcha) {
+                showCaptchaWindow();
+                return;
+            }
+
+            const { data } = response;
+            if (!data) {
+                setErrorMessage('Серверээс хариу ирсэнгүй');
+                return;
+            }
+
+            switch (data.code) {
+                case 'OK': {
+                    console.log('✅ Transaction амжилттай:', { count: data.transactions?.length ?? 0 });
+                    setErrorMessage('');
+
+                    if (data.transactions) {
+                        setTransactions(data.transactions);
+                        const total = calculateTotalAmount(data.transactions);
+                        setTotalAmount(total);
+                    }
+
+                    if (data.account) {
+                        setAmount(`₮ ${data.account.toLocaleString()}`);
+                    }
+                    break;
+                }
+
+                case 'CAPTCHA_PENDING': {
+                    console.log('🔒 CAPTCHA шаардлагатай:', data.message);
+                    setErrorMessage(data.message || 'CAPTCHA шаардлагатай');
+                    showCaptchaWindow();
+
+                    if (data.transactions?.length > 0) {
+                        setTransactions(data.transactions);
+                        setTotalAmount(calculateTotalAmount(data.transactions));
+                    }
+                    break;
+                }
+
+                case 'REGISTER_DEVICE': {
+                    console.log('📱 Төхөөрөмж таниулах:', data.message);
+                    setErrorMessage(data.message || 'Шинээр төхөөрөмж таниулах шаардлагатай');
+                    showCaptchaWindow();
+                    break;
+                }
+
+                case 'BANK_ERROR':
+                case 'CONNECTION_ERROR': {
+                    console.log('⚠️ Банкны алдаа:', data.message);
+                    setErrorMessage(data.message || 'Банкны серверийн алдаа');
+                    break;
+                }
+
+                case 'TOKEN_EXPIRED': {
+                    console.log('🔑 Token дууссан:', data.message);
+                    setErrorMessage(data.message || 'Token дууссан байна');
+                    break;
+                }
+
+                case 'NO_ACCOUNT': {
+                    console.log('❌ Данс олдсонгүй:', data.message);
+                    setErrorMessage(data.message || 'Bank account олдсонгүй');
+                    break;
+                }
+
+                default: {
+                    // Legacy формат
+                    if (data.captchaPending) {
+                        setErrorMessage(data.bankMessage || 'CAPTCHA шаардлагатай');
+                        showCaptchaWindow();
+                    } else if (data.registerDevice) {
+                        setErrorMessage(data.bankMessage || 'Төхөөрөмж таниулах');
+                        showCaptchaWindow();
+                    } else if (data.transactions) {
+                        setTransactions(data.transactions);
+                        setTotalAmount(calculateTotalAmount(data.transactions));
+                        if (data.account) {
+                            setAmount(`₮ ${data.account.toLocaleString()}`);
+                        }
+                    }
+                    break;
+                }
+            }
+
+        } catch (transactionError) {
+            console.error('❌ getTransactions алдаа:', transactionError);
+            setErrorMessage('Гүйлгээний мэдээлэл авахад алдаа гарлаа');
+        } finally {
+            fetchingRef.current = false;
         }
-      } else {
-        console.log('⚠️ Bank credentials олдсонгүй, CAPTCHA дуудах');
-        showCaptchaWindow();
-      }
+    };
 
-    } catch (error) {
-      console.error('❌ tokenRefresh алдаа:', error);
-      setErrorMessage('Token шинэчлэхэд алдаа гарлаа');
-    } finally {
-      setLoading(false);
-    }
-  }
-  const showCaptchaWindow = async () => {
-    console.log('🔄 CAPTCHA дуудаж байна...');
-    try {
-      await desktopService.clearKhanBankCookiesFromServer(['all_cookies']);
-      const result = await window.electron.createCaptchaWindow(customerBankAccount.isCitizen);
-      console.log('✅ CAPTCHA дуудагдалаа:', result);
-    } catch (captchaError) {
-      console.error('❌ CAPTCHA дуудахад алдаа:', captchaError);
-      setErrorMessage('CAPTCHA дуудахад алдаа гарлаа');
-    }
-  }
 
-  // Polling функцийг эхлүүлэх (socket салсан үед)
-  const startPolling = () => {
-    // Хэрэв socket холбогдсон байвал polling эхлүүлэхгүй
-    if (socketConnected) {
-      console.log('⚠️ Socket холбогдсон байгаа тул polling эхлүүлэхгүй');
-      return;
-    }
+    const tokenRefresh = async () => {
+        if (captchaOpenRef.current) {
+            console.log('⚠️ CAPTCHA нээлттэй байгаа тул tokenRefresh алгасах');
+            return;
+        }
 
-    // Хэрэв polling аль хэдийн ажиллаж байвал шинээр эхлүүлэхгүй
-    if (pollingIntervalRef.current) {
-      console.log('⚠️ Polling аль хэдийн ажиллаж байна');
-      return;
-    }
+        setLoading(true);
+        setErrorMessage('');
 
-    console.log('▶️ Polling эхлүүлж байна (30 секунд тутамд)...');
-    
-    // Эхлээд нэг удаа шууд дуудах
-    fetchAccountAndAmount();
+        try {
+            console.log('🔄 tokenRefresh дуудагдаж байна');
 
-    // Дараа нь 30 секунд тутамд давтах
-    pollingIntervalRef.current = setInterval(() => {
-      // Socket холбогдсон эсэхийг дахин шалгах
-      if (!socketConnected && !fetchingRef.current) {
-        console.log('🔄 Polling: Transaction-уудыг шалгаж байна...');
-        fetchAccountAndAmount();
-      } else if (socketConnected) {
-        console.log('⏸️ Socket холбогдсон тул polling зогсоож байна...');
+            if (customerBankAccount?.bankUserName && customerBankAccount?.bankPassword) {
+                const tokenResult = await getTokenAndStore(customerBankAccount.customerId || customerBankAccount.CustomerId);
+                setTokenResult(tokenResult);
+
+                if (tokenResult.isDuplicate) {
+                    console.log('⚠️ Duplicate getTokenAndStore, алгасах');
+                    return;
+                }
+
+                if (tokenResult.success) {
+                    await fetchAccountAndAmount();
+                } else {
+                    console.log('❌ Token авахад алдаа:', tokenResult.errorMessage);
+
+                    if (tokenResult.needCaptcha) {
+                        showCaptchaWindow();
+                    }
+                    setErrorMessage(tokenResult.errorMessage || 'Token авахад алдаа гарлаа');
+                }
+            } else {
+                console.log('⚠️ Bank credentials олдсонгүй');
+                showCaptchaWindow();
+            }
+
+        } catch (error) {
+            console.error('❌ tokenRefresh алдаа:', error);
+            setErrorMessage('Token шинэчлэхэд алдаа гарлаа');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const captchaOpenRef = useRef(false);
+
+    const showCaptchaWindow = async () => {
+        // Аль хэдийн нээлттэй бол дахин нээхгүй
+        if (captchaOpenRef.current) {
+            console.log('⚠️ CAPTCHA цонх аль хэдийн нээлттэй, алгасах');
+            return;
+        }
+
+        console.log('🔄 CAPTCHA цонх нээж байна...');
+        captchaOpenRef.current = true;
+
+        // CAPTCHA нээлттэй үед polling зогсоох
         stopPolling();
-      }
-    }, 30000); // 30 секунд
-  }
+
+        try {
+            await desktopService.clearKhanBankCookiesFromServer(['all_cookies']);
+            const result = await window.electron.createCaptchaWindow(customerBankAccount.isCitizen);
+            console.log('✅ CAPTCHA цонх нээгдлээ:', result);
+        } catch (captchaError) {
+            console.error('❌ CAPTCHA нээхэд алдаа:', captchaError);
+            setErrorMessage('CAPTCHA нээхэд алдаа гарлаа');
+            captchaOpenRef.current = false; // Алдаа гарвал flag цэвэрлэх
+        }
+    };
+
+
+    // Polling функцийг эхлүүлэх (socket салсан үед)
+    // Polling — CAPTCHA нээлттэй бол эхлүүлэхгүй
+    const startPolling = () => {
+        if (socketConnected || captchaOpenRef.current || pollingIntervalRef.current) {
+            return;
+        }
+
+        console.log('▶️ Polling эхлүүлж байна (30 секунд)...');
+        fetchAccountAndAmount();
+
+        pollingIntervalRef.current = setInterval(() => {
+            if (captchaOpenRef.current) {
+                console.log('⏸️ CAPTCHA нээлттэй тул polling алгасах');
+                return;
+            }
+            if (!socketConnected && !fetchingRef.current) {
+                fetchAccountAndAmount();
+            } else if (socketConnected) {
+                stopPolling();
+            }
+        }, 30000);
+    };
 
   // Polling функцийг зогсоох
   const stopPolling = () => {

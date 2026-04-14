@@ -204,8 +204,7 @@ function createMockAutoUpdater() {
   
   return mockAutoUpdater;
 }
-const captchaWindowManager = require('./CaptchaWindow');
-// node-fetch will be imported dynamically as ES Module
+const captchaManager = require('./captcha/captcha-manager');
 
 // Set app name for notifications and window titles
 app.setName('NovaQ Desktop');
@@ -1201,7 +1200,6 @@ function createWindow() {
     height: 510,
     resizable: true,
     maximizable: false,
-    frame: false,
     title: 'NovaQ Desktop',
     alwaysOnTop: true,
     skipTaskbar: false,
@@ -1764,65 +1762,77 @@ ipcMain.handle('getDeviceId', async (event, params) => {
 
 
 ipcMain.handle('create-captcha-window', async (event, isCitizen = true) => {
-  console.log('🔒 [MAIN] Creating CAPTCHA window, isCitizen:', isCitizen);
-  try {
-    const window = await captchaWindowManager.createCaptchaWindow(isCitizen === 1, mainWindow);
-    console.log('✅ [MAIN] CAPTCHA window created successfully');
-    return {
-      success: true,
-      message: 'CAPTCHA window created successfully',
-      isCitizen: isCitizen
-    };
-  } catch (error) {
-    console.error('❌ [MAIN] Error creating CAPTCHA window:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
+    console.log('🔒 [MAIN] Creating CAPTCHA window, isCitizen:', isCitizen);
+    try {
+        await captchaManager.open(isCitizen ? 1 : 0, mainWindow);
+        console.log('✅ [MAIN] CAPTCHA window created successfully');
+        return {
+            success: true,
+            message: 'CAPTCHA window created successfully',
+            isCitizen: isCitizen
+        };
+    } catch (error) {
+        console.error('❌ [MAIN] Error creating CAPTCHA window:', error);
+        return { success: false, error: error.message };
+    }
 });
 
 ipcMain.handle('close-captcha-window', async () => {
-  try {
-    const result = captchaWindowManager.closeCaptchaWindow();
-    if (result) {
-      return { success: true, message: 'CAPTCHA window closed' };
+    try {
+        await captchaManager.close();
+        return { success: true, message: 'CAPTCHA window closed' };
+    } catch (error) {
+        console.error('❌ Error closing CAPTCHA window:', error);
+        return { success: false, error: error.message };
     }
-    return { success: false, message: 'No CAPTCHA window to close' };
-  } catch (error) {
-    console.error('❌ Error closing CAPTCHA window:', error);
-    return { success: false, error: error.message };
-  }
 });
 
 ipcMain.handle('is-captcha-window-open', async () => {
-  try {
-    const isOpen = captchaWindowManager.isCaptchaWindowOpen();
-    return { success: true, isOpen: isOpen };
-  } catch (error) {
-    console.error('❌ Error checking CAPTCHA window status:', error);
-    return { success: false, error: error.message };
-  }
+    try {
+        const isOpen = captchaManager.isOpen();
+        return { success: true, isOpen };
+    } catch (error) {
+        console.error('❌ Error checking CAPTCHA window status:', error);
+        return { success: false, error: error.message };
+    }
 });
 
 ipcMain.handle('clear-captcha-hooks', async () => {
-  try {
-    const result = captchaWindowManager.clearHook();
-    return { success: true, message: 'CAPTCHA hooks cleared successfully' };
-  } catch (error) {
-    console.error('❌ Error clearing CAPTCHA hooks:', error);
-    return { success: false, error: error.message };
-  }
+    try {
+        // cookieCollector нь captchaManager.close() дотор автомат цэвэрлэгдэнэ.
+        // Гэхдээ тусад нь дуудах бол:
+        if (captchaManager.cookieCollector) {
+            captchaManager.cookieCollector.uninstall();
+            captchaManager.cookieCollector = null;
+        }
+        return { success: true, message: 'CAPTCHA hooks cleared successfully' };
+    } catch (error) {
+        console.error('❌ Error clearing CAPTCHA hooks:', error);
+        return { success: false, error: error.message };
+    }
 });
 
 ipcMain.handle('reinstall-captcha-hooks', async (event, isCitizen = true) => {
-  try {
-    const result = captchaWindowManager.reinstallHook(isCitizen);
-    return { success: true, message: 'CAPTCHA hooks reinstalled successfully' };
-  } catch (error) {
-    console.error('❌ Error reinstalling CAPTCHA hooks:', error);
-    return { success: false, error: error.message };
-  }
+    try {
+        // Хуучин hooks устгаад шинээр суулгах
+        if (captchaManager.cookieCollector) {
+            captchaManager.cookieCollector.uninstall();
+        }
+        if (captchaManager.window && !captchaManager.window.isDestroyed()) {
+            const CookieCollector = require('./socket/cookie-collector');
+            const WindowsCompatibility = require('./utils/windows7Compat');
+            const winCompat = new WindowsCompatibility();
+            const citizenNum = isCitizen ? 1 : 0;  // ← boolean → number энд хөрвүүлнэ
+            captchaManager.cookieCollector = new CookieCollector(
+                captchaManager.window, citizenNum, winCompat
+            );
+            captchaManager.cookieCollector.install();
+        }
+        return { success: true, message: 'CAPTCHA hooks reinstalled successfully' };
+    } catch (error) {
+        console.error('❌ Error reinstalling CAPTCHA hooks:', error);
+        return { success: false, error: error.message };
+    }
 });
 
 
@@ -2869,118 +2879,4 @@ ipcMain.handle('after-login-check-update', async () => {
 });
 
 // Removed fetchRemoteVersionFromDB function as the API endpoint doesn't exist
-
-function httpsGetJson(url) {
-  return new Promise((resolve, reject) => {
-    const lib = url.startsWith('https') ? require('https') : require('http');
-    lib.get(url, (res) => {
-      if (res.statusCode !== 200) return reject(new Error('HTTP '+res.statusCode));
-      let data=''; res.on('data', d=>data+=d);
-      res.on('end', ()=>{ try { resolve(JSON.parse(data)); } catch(e){ reject(e);} });
-    }).on('error', reject);
-  });
-}
-
 // === C:\Novaq\NovaQ Desktop руу хуулах функц ===
-
-async function copyUpdateToNovaqFolder(downloadedFile) {
-  try {
-    const targetDir = 'C:\\Novaq\\NovaQ Desktop';
-    
-    // Create target directory if it doesn't exist
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-      console.log('📁 Created target directory:', targetDir);
-    }
-    
-    // Copy the downloaded file to target directory
-    const fileName = path.basename(downloadedFile);
-    const targetPath = path.join(targetDir, fileName);
-    
-    fs.copyFileSync(downloadedFile, targetPath);
-    console.log('✅ Copied update file to:', targetPath);
-    
-    // If it's a zip file, extract it
-    if (fileName.endsWith('.zip')) {
-      const { exec } = require('child_process');
-      const extractCommand = `tar -xf "${targetPath}" -C "${targetDir}"`;
-      
-      exec(extractCommand, (error, stdout, stderr) => {
-        if (error) {
-          console.warn('⚠️ Tar extraction failed, trying PowerShell fallback...');
-          
-          // Fallback to PowerShell with proper execution policy
-          const powershellCommand = `powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '${targetPath}' -DestinationPath '${targetDir}' -Force"`;
-          
-          exec(powershellCommand, (psError, psStdout, psStderr) => {
-            if (psError) {
-              console.error('❌ PowerShell extraction error:', psError);
-        } else {
-              console.log('✅ Successfully extracted zip using PowerShell to:', targetDir);
-          // Delete the zip file after extraction
-              try {
-          fs.unlinkSync(targetPath);
-          console.log('🗑️ Deleted zip file after extraction');
-              } catch (deleteError) {
-                console.warn('⚠️ Could not delete zip file:', deleteError.message);
-              }
-            }
-          });
-        } else {
-          console.log('✅ Successfully extracted zip using tar to:', targetDir);
-          // Delete the zip file after extraction
-          try {
-            fs.unlinkSync(targetPath);
-            console.log('🗑️ Deleted zip file after extraction');
-          } catch (deleteError) {
-            console.warn('⚠️ Could not delete zip file:', deleteError.message);
-          }
-        }
-      });
-    }
-    
-    return { success: true, targetPath: targetPath };
-  } catch (error) {
-    console.error('❌ Error copying update to Novaq folder:', error);
-    return { success: false, error: error.message };
-  }
-}
-
-
-
-function getUpdaterPs1() {
-  // ZIP татаж тайлаад INSTALL_DIR руу хуулж, version.txt бичээд exe-г асаана
-  return `
-param(
-  [string]$InstallDir,
-  [string]$ZipUrl,
-  [string]$Version
-)
-$ErrorActionPreference = "Stop"
-function Ensure-Dir($p){ if(-not(Test-Path $p)){ New-Item -ItemType Directory -Force -Path $p | Out-Null } }
-Ensure-Dir $InstallDir
-$downloads = Join-Path $InstallDir "_downloads"
-Ensure-Dir $downloads
-
-# ажиллаж буй exe-ийг зогсооно
-Get-Process "NovaQ Desktop" -ErrorAction SilentlyContinue | Stop-Process -Force
-
-$zipName = Split-Path $ZipUrl -Leaf
-$zipPath = Join-Path $downloads $zipName
-Invoke-WebRequest -Uri $ZipUrl -OutFile $zipPath
-
-# тайлж хуулна
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$temp = Join-Path $downloads "extract-$stamp"
-New-Item -ItemType Directory -Path $temp | Out-Null
-Expand-Archive -Path $zipPath -DestinationPath $temp -Force
-
-# mirror copy (downloads/backups-гүй)
-& robocopy $temp $InstallDir /MIR /NFL /NDL /NJH /NJS /NP 1>$null 2>$null
-
-# version бичээд цэвэрлээд асаана
-Set-Content -Path (Join-Path $InstallDir "version.txt") -Value $Version -Encoding ASCII
-Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
-Start-Process -FilePath (Join-Path $InstallDir "NovaQ Desktop.exe")
-`;
-}
