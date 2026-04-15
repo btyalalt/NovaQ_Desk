@@ -1,305 +1,309 @@
+// ============================================================
+// services/socketService.js — Нэгдсэн Socket Service
+// ============================================================
+// Нэг socket холболт бүгдийг хийнэ:
+//   - newTransactions event (server poller-ээс)
+//   - captcha-update event (captcha-listener-ээс)
+//   - captcha-setup emit (CAPTCHA цонх нээхэд)
+//   - joinRoom emit (user-specific room)
+
 const io = require('socket.io-client');
 const { API_CONFIG } = require('../utils/constants');
 
 class SocketService {
-  constructor() {
-    this.socket = null;
-    this.isConnected = false;
-  }
+    constructor() {
+        this.socket = null;
+        this.isConnected = false;
+        this._userId = null;
+        this._isCitizen = null;
 
-  // Get correct API URL based on environment
-  getApiUrl() {
-    // Check if we're in Electron environment
-    if (typeof window !== 'undefined' && window.electron) {
-      // Check environment to determine API URL
-      const isDevelopment = process.env.NODE_ENV === 'development' || 
-                           (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
-      
-      if (isDevelopment) {
-        return 'http://localhost:3101';
-      } else {
-        return 'http://103.168.56.34:3101';
-      }
-    }
-    
-    // In browser environment (non-Electron), check if we're on localhost
-    if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
-      const isRealDevelopment = process.env.NODE_ENV === 'development' && 
-                                !process.execPath.includes('electron');
-      
-      if (isRealDevelopment && 
-          (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        return 'http://localhost:3101';
-      }
+        // Callback-ууд
+        this._onCaptchaDone = null;
+        this._onNewTransactions = null;
+        this._onCaptchaRequired = null;
+        this._onTokenExpired = null;
+        this._onConnectChange = null;
     }
 
-    // Use production URL or configured URL
-    return API_CONFIG.BASE_URL;
-  }
+    // ─── Connection ────────────────────────────────────────────
 
-  // ✅ Socket.io холболт хийх
-  connect(url = null, userId = null) {
-    if (!url) {
-      url = this.getApiUrl();
-    }
-    
-    console.log('🔌 User-specific socket холболт үүсгэж байна:', url, 'userId:', userId);
-    
-    try {
-      // User ID-тай холболт хийх - WebSocket алдааг багасгах
-      const options = userId ? { 
-        query: { userId: userId },
-        transports: ['polling'], // Зөвхөн polling ашиглах - WebSocket алдааг бүрэн арилгах
-        timeout: 15000, // 15 секунд timeout
-        forceNew: true, // Шинэ холболт үүсгэх
-        reconnection: true, // Автомат дахин холбогдох
-        reconnectionAttempts: 5, // 5 удаа оролдох
-        reconnectionDelay: 3000, // 3 секунд хүлээх
-        reconnectionDelayMax: 10000, // Хамгийн ихдээ 10 секунд хүлээх
-        maxReconnectionAttempts: 5, // Хамгийн ихдээ 5 удаа оролдох
-        autoConnect: true, // Автомат холбогдох
-        upgrade: false, // WebSocket upgrade хориглох
-        rememberUpgrade: false // Upgrade-г санахгүй байх
-      } : {
-        transports: ['polling'], // Зөвхөн polling ашиглах
-        timeout: 15000,
-        forceNew: true,
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 3000,
-        reconnectionDelayMax: 10000,
-        maxReconnectionAttempts: 5,
-        autoConnect: true,
-        upgrade: false, // WebSocket upgrade хориглох
-        rememberUpgrade: false
-      };
-      
-      this.socket = io(url, options);
-      this.setupEventHandlers();
-      
-      // ✅ Connection-г шалгах
-      if (this.socket.connected) {
-        this.isConnected = true;
-        console.log('🔌 User-specific Socket.io холбогдлоо (синхрон):', this.socket.id, 'userId:', userId);
-        
-        // User ID байвал room-д join хийх
-        if (userId) {
-          this.joinUserRoom(userId);
+    /**
+     * Socket холболт хийх
+     * @param {string|null} userId - User ID (room join + query)
+     * @param {number|null} isCitizen - IsCitizen утга (captcha-setup)
+     */
+    connect(userId = null, isCitizen = null) {
+        // Аль хэдийн холбогдсон бол давхар холбохгүй
+        if (this.socket && this.isConnected) {
+            console.log('[SocketService] Аль хэдийн холбогдсон');
+            return this.socket;
         }
-      }
-      
-      return this.socket;
-    } catch (error) {
-      console.error('❌ Socket.io холболт хийхэд алдаа:', error);
-      this.handleConnectionError(url, userId);
-      return null;
-    }
-  }
 
-  // ✅ Event handlers тохируулах
-  setupEventHandlers() {
-    if (!this.socket) return;
+        // Хуучин socket байвал цэвэрлэх
+        if (this.socket) {
+            this.disconnect();
+        }
 
-    this.socket.on('connect', () => {
-      this.isConnected = true;
-      console.log('🔌 Socket.io холбогдлоо:', this.socket.id);
-    });
+        this._userId = userId;
+        this._isCitizen = isCitizen;
 
-    this.socket.on('disconnect', (reason) => {
-      this.isConnected = false;
-      console.log('🔌 Socket.io холболт тасарлаа:', reason);
-      
-      // Автомат дахин холбогдох оролдлого
-      if (reason === 'io server disconnect') {
-        console.log('🔄 Server disconnect, дахин холбогдох оролдлого...');
-      }
-    });
+        const url = this._getApiUrl();
+        console.log(`[SocketService] Холбогдож байна: ${url}, userId: ${userId}`);
 
-    this.socket.on('connect_error', (error) => {
-      console.error('❌ Socket.io холболтын алдаа:', error.message);
-      this.isConnected = false;
-      
-      // WebSocket алдаа бол fallback механизм ашиглах
-      if (error.message.includes('websocket') || error.message.includes('WebSocket') || 
-          error.message.includes('connection failed') || error.message.includes('timeout')) {
-        console.log('🔄 WebSocket алдаа, polling transport оролдох...');
-        this.tryPollingFallback();
-      }
-      
-      // Хэрэглэгчид мэдээлэл өгөх
-      if (typeof window !== 'undefined' && window.electron) {
         try {
-          window.electron.showNotification('Сүлжээний алдаа', 'Сервертэй холбогдох боломжгүй байна. Дахин оролдох...');
-        } catch (notifError) {
-          console.log('Notification илгээх боломжгүй:', notifError);
+            this.socket = io(url, {
+                query: userId ? { userId } : {},
+                transports: ['polling'],
+                timeout: 15000,
+                forceNew: true,
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 3000,
+                reconnectionDelayMax: 10000,
+                upgrade: false,
+                rememberUpgrade: false,
+            });
+
+            this._setupEventHandlers();
+            return this.socket;
+        } catch (error) {
+            console.error('[SocketService] Холболт алдаа:', error.message);
+            this.isConnected = false;
+            return null;
         }
-      }
-    });
-
-    this.socket.on('error', (error) => {
-      console.error('❌ Socket.io алдаа:', error);
-      this.isConnected = false;
-    });
-
-    // Reconnection events
-    this.socket.on('reconnect', (attemptNumber) => {
-      console.log('🔄 Socket.io дахин холбогдлоо:', attemptNumber);
-      this.isConnected = true;
-    });
-
-    this.socket.on('reconnect_attempt', (attemptNumber) => {
-      console.log('🔄 Socket.io дахин холбогдох оролдлого:', attemptNumber);
-    });
-
-    this.socket.on('reconnect_error', (error) => {
-      console.error('❌ Socket.io дахин холбогдох алдаа:', error);
-    });
-
-    this.socket.on('reconnect_failed', () => {
-      console.error('❌ Socket.io дахин холбогдох амжилтгүй боллоо');
-      this.isConnected = false;
-    });
-  }
-
-  // ✅ CAPTCHA setup илгээх
-  emitCaptchaSetup(userOid, isCitizen) {
-    if (this.socket && (this.isConnected || this.socket.connected)) {
-      this.socket.emit('captcha-setup', {
-        userOid: userOid,
-        isCitizen: isCitizen
-      });
-      console.log('📤 CAPTCHA setup илгээгдлээ:', { userOid, isCitizen });
-    } else {
-      console.warn('⚠️ Socket холболтгүй байна, offline mode ашиглах');
-      // Offline mode-д CAPTCHA setup хадгалах
-      this.emitCaptchaSetupOffline(userOid, isCitizen);
     }
-  }
 
-  // ✅ User-specific room-д join хийх
-  joinUserRoom(userId) {
-    if (this.socket && (this.isConnected || this.socket.connected)) {
-      this.socket.emit('joinRoom', { userId: userId });
-      console.log('🏠 User room-д join хийлээ:', userId);
-    } else {
-      console.warn('⚠️ Socket холболтгүй байна, room join хийх боломжгүй');
+    /**
+     * Socket холболт хаах + бүх listener цэвэрлэх
+     */
+    disconnect() {
+        if (this.socket) {
+            try {
+                this.socket.removeAllListeners();
+                this.socket.disconnect();
+            } catch (err) {
+                console.error('[SocketService] Disconnect алдаа:', err.message);
+            }
+            this.socket = null;
+        }
+        this.isConnected = false;
+        this._userId = null;
+        console.log('[SocketService] Disconnected');
+
+        if (this._onConnectChange) {
+            this._onConnectChange(false);
+        }
     }
-  }
 
-  // ✅ CAPTCHA update event listener нэмэх
-  onCaptchaUpdate(callback) {
-    if (this.socket) {
-      this.socket.on('captcha-update', callback);
-      console.log('👂 CAPTCHA update listener нэмэгдлээ (socketService)');
-    } else {
-      console.warn('⚠️ Socket объект null байна, event listener нэмэх боломжгүй');
+    // ─── Event Callbacks ───────────────────────────────────────
+
+    /**
+     * CAPTCHA амжилттай дууссан
+     * @param {Function} cb - (result) => void
+     */
+    onCaptchaDone(cb) {
+        this._onCaptchaDone = cb;
     }
-  }
 
-  // ✅ Transaction update event listener нэмэх
-  onTransactionUpdate(callback) {
-    if (this.socket) {
-      this.socket.on('newTransactions', callback);
-      console.log('👂 Transaction update listener нэмэгдлээ (socketService)');
-    } else {
-      console.warn('⚠️ Socket объект null байна, transaction listener нэмэх боломжгүй');
+    /**
+     * Шинэ гүйлгээ ирсэн (server poller-ээс)
+     * @param {Function} cb - (data) => void
+     */
+    onNewTransactions(cb) {
+        this._onNewTransactions = cb;
     }
-  }
 
-  // ✅ Socket холболт хаах
-  disconnect() {
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
-      this.isConnected = false;
-      console.log('🔌 Socket холболт хаагдлаа');
+    /**
+     * CAPTCHA шаардлагатай (server poller CAPTCHA_PENDING илрүүлсэн)
+     * @param {Function} cb - (data) => void
+     */
+    onCaptchaRequired(cb) {
+        this._onCaptchaRequired = cb;
     }
-  }
 
-  // ✅ Socket холболт байгаа эсэхийг шалгах
-  isSocketConnected() {
-    return this.socket && this.isConnected;
-  }
-
-  // ✅ WebSocket алдааны fallback механизм
-  tryPollingFallback() {
-    if (!this.socket) return;
-    
-    console.log('🔄 Polling transport оролдох...');
-    
-    // Socket-г хаах
-    this.socket.disconnect();
-    
-    // Зөвхөн polling ашиглан дахин холбогдох
-    const pollingOptions = {
-      transports: ['polling'],
-      timeout: 20000,
-      forceNew: true,
-      reconnection: true,
-      reconnectionAttempts: 3,
-      reconnectionDelay: 5000,
-      autoConnect: true,
-      upgrade: false, // WebSocket upgrade хориглох
-      rememberUpgrade: false
-    };
-    
-    // Дахин холбогдох
-    setTimeout(() => {
-      const url = this.getApiUrl();
-      this.socket = io(url, pollingOptions);
-      this.setupEventHandlers();
-      console.log('🔄 Polling transport-оор дахин холбогдох оролдлого...');
-    }, 2000);
-  }
-
-  // ✅ Холболтын алдааны удирдлага
-  handleConnectionError(url, userId) {
-    console.error('❌ Socket холболт амжилтгүй боллоо:', url);
-    
-    // Offline mode болон fallback механизм
-    this.isConnected = false;
-    
-    // Хэрэглэгчид мэдээлэл өгөх
-    if (typeof window !== 'undefined' && window.electron) {
-      // Electron environment-д notification өгөх
-      try {
-        window.electron.showNotification('Сүлжээний холболт', 'Socket сервертэй холбогдох боломжгүй байна. Офлайн горимд ажиллаж байна.');
-      } catch (error) {
-        console.log('Notification илгээх боломжгүй:', error);
-      }
+    /**
+     * Token дууссан
+     * @param {Function} cb - (data) => void
+     */
+    onTokenExpired(cb) {
+        this._onTokenExpired = cb;
     }
-    
-    // Retry механизм
-    setTimeout(() => {
-      console.log('🔄 Socket холболт дахин оролдох...');
-      this.connect(url, userId);
-    }, 5000); // 5 секунд хүлээгээд дахин оролдох
-  }
 
-  // ✅ Offline mode шалгах
-  isOfflineMode() {
-    return !this.isConnected && (!this.socket || !this.socket.connected);
-  }
-
-  // ✅ CAPTCHA setup offline mode-д
-  emitCaptchaSetupOffline(userOid, isCitizen) {
-    console.log('📤 CAPTCHA setup (offline mode):', { userOid, isCitizen });
-    // Offline mode-д localStorage-д хадгалах
-    try {
-      const captchaSetup = {
-        userOid: userOid,
-        isCitizen: isCitizen,
-        timestamp: Date.now(),
-        offline: true
-      };
-      localStorage.setItem('novaq_captcha_setup_offline', JSON.stringify(captchaSetup));
-      console.log('💾 CAPTCHA setup offline хадгалагдлаа');
-    } catch (error) {
-      console.error('❌ CAPTCHA setup offline хадгалах алдаа:', error);
+    /**
+     * Socket холболтын төлөв өөрчлөгдсөн
+     * @param {Function} cb - (connected: boolean) => void
+     */
+    onConnectChange(cb) {
+        this._onConnectChange = cb;
     }
-  }
+
+    // ─── Emitters ──────────────────────────────────────────────
+
+    /**
+     * CAPTCHA setup илгээх (CAPTCHA цонх нээхэд)
+     */
+    emitCaptchaSetup(userOid, isCitizen) {
+        if (!this._isReady()) {
+            console.warn('[SocketService] Socket бэлэн биш, captcha-setup илгээгдсэнгүй');
+            return;
+        }
+
+        this.socket.emit('captcha-setup', { userOid, isCitizen });
+        console.log('[SocketService] captcha-setup илгээгдлээ:', { userOid, isCitizen });
+    }
+
+    /**
+     * User room-д нэгдэх
+     */
+    joinUserRoom(userId) {
+        if (!this._isReady()) return;
+
+        this.socket.emit('joinRoom', { userId });
+        console.log(`[SocketService] Room нэгдлээ: ${userId}`);
+    }
+
+    // ─── Status ────────────────────────────────────────────────
+
+    isSocketConnected() {
+        return !!(this.socket && this.isConnected);
+    }
+
+    getSocketId() {
+        return this.socket?.id ?? null;
+    }
+
+    // ─── Private: Event Handlers ───────────────────────────────
+
+    _setupEventHandlers() {
+        if (!this.socket) return;
+
+        // ─── Connect ───
+        this.socket.on('connect', () => {
+            this.isConnected = true;
+            console.log('[SocketService] Connected:', this.socket.id);
+
+            // Room join
+            if (this._userId) {
+                this.joinUserRoom(this._userId);
+            }
+
+            // CAPTCHA setup
+            if (this._userId && this._isCitizen !== null) {
+                this.emitCaptchaSetup(this._userId, this._isCitizen);
+            }
+
+            if (this._onConnectChange) {
+                this._onConnectChange(true);
+            }
+        });
+
+        // ─── Disconnect ───
+        this.socket.on('disconnect', (reason) => {
+            this.isConnected = false;
+            console.log('[SocketService] Disconnected:', reason);
+
+            if (this._onConnectChange) {
+                this._onConnectChange(false);
+            }
+        });
+
+        // ─── Connect Error ───
+        this.socket.on('connect_error', (error) => {
+            this.isConnected = false;
+            console.error('[SocketService] Connect error:', error.message);
+        });
+
+        // ─── Reconnect ───
+        this.socket.on('reconnect', (attemptNumber) => {
+            this.isConnected = true;
+            console.log('[SocketService] Reconnected:', attemptNumber);
+
+            if (this._onConnectChange) {
+                this._onConnectChange(true);
+            }
+        });
+
+        this.socket.on('reconnect_failed', () => {
+            this.isConnected = false;
+            console.error('[SocketService] Reconnect failed');
+
+            if (this._onConnectChange) {
+                this._onConnectChange(false);
+            }
+        });
+
+        // ─── Business Events ───
+
+        // Шинэ гүйлгээ (server TransactionPoller-ээс)
+        this.socket.on('newTransactions', (data) => {
+            console.log('[SocketService] newTransactions:', data?.data?.transactions?.length ?? 0);
+            if (this._onNewTransactions) {
+                this._onNewTransactions(data);
+            }
+        });
+
+        // CAPTCHA дууссан (server captcha-listener-ээс)
+        this.socket.on('captcha-update', (result) => {
+            console.log('[SocketService] captcha-update:', {
+                success: result?.success,
+                done: result?.captchaDone,
+                shouldClose: result?.shouldCloseWindow,
+            });
+
+            if (result?.success && result?.captchaDone) {
+                if (this._onCaptchaDone) {
+                    this._onCaptchaDone(result);
+                }
+            }
+        });
+
+        // CAPTCHA шаардлагатай (server poller CAPTCHA илрүүлсэн)
+        this.socket.on('captcha_required', (data) => {
+            console.log('[SocketService] captcha_required:', data?.message);
+            if (this._onCaptchaRequired) {
+                this._onCaptchaRequired(data);
+            }
+        });
+
+        // Token дууссан
+        this.socket.on('tokenExpired', (data) => {
+            console.log('[SocketService] tokenExpired');
+            if (this._onTokenExpired) {
+                this._onTokenExpired(data);
+            }
+        });
+
+        // CAPTCHA resolved (server-ээс monitoring дахин эхэлсэн)
+        this.socket.on('captcha_resolved', (data) => {
+            console.log('[SocketService] captcha_resolved:', data?.message);
+        });
+    }
+
+    // ─── Private: Helpers ──────────────────────────────────────
+
+    _isReady() {
+        return !!(this.socket && (this.isConnected || this.socket.connected));
+    }
+
+    _getApiUrl() {
+        if (typeof window !== 'undefined' && window.electron) {
+            const isDev = process.env.NODE_ENV === 'development' ||
+                (typeof process !== 'undefined' && process.argv?.includes('--dev'));
+            return isDev ? 'http://localhost:3101' : 'http://103.168.56.34:3101';
+        }
+
+        if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
+            const isDev = process.env.NODE_ENV === 'development' &&
+                !process.execPath?.includes('electron');
+            if (isDev && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+                return 'http://localhost:3101';
+            }
+        }
+
+        return API_CONFIG.BASE_URL;
+    }
 }
 
-// Singleton instance үүсгэх
+// Singleton
 const socketService = new SocketService();
 module.exports = socketService;

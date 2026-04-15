@@ -117,22 +117,6 @@ const LoginScreen = () => {
                 }
                 setUserId(refreshedData.user.username);
                 setIsLoggedIn(true);
-
-                // Send CAPTCHA setup with isCitizen information (auto-refresh)
-                if (refreshedData.customerBankAccount?.IsCitizen !== undefined) {
-                  try {
-                    const socketService = require('../services/socketService').default;
-                    if (socketService && socketService.emitCaptchaSetup) {
-                      socketService.emitCaptchaSetup(refreshedData.user.username, refreshedData.customerBankAccount.IsCitizen);
-                      console.log('📤 CAPTCHA setup илгээгдлээ (auto-refresh дараа):', { 
-                        userOid: refreshedData.user.username, 
-                        isCitizen: refreshedData.customerBankAccount.IsCitizen 
-                      });
-                    }
-                  } catch (error) {
-                    console.error('❌ CAPTCHA setup илгээхэд алдаа (auto-refresh):', error);
-                  }
-                }
                 
                 // Хэрэглэгчийн мэдээлэл амжилттай сэргээгдсэн бол login history хадгалах
                 try {
@@ -376,22 +360,6 @@ const LoginScreen = () => {
 
       setUserId(found.username);
       setIsLoggedIn(true);
-
-      // Send CAPTCHA setup with isCitizen information
-      if (result.customerBankAccount?.IsCitizen !== undefined) {
-        try {
-          const socketService = require('../services/socketService').default;
-          if (socketService && socketService.emitCaptchaSetup) {
-            socketService.emitCaptchaSetup(found.username, result.customerBankAccount.IsCitizen);
-            console.log('📤 CAPTCHA setup илгээгдлээ (login дараа):', { 
-              userOid: found.username, 
-              isCitizen: result.customerBankAccount.IsCitizen 
-            });
-          }
-        } catch (error) {
-          console.error('❌ CAPTCHA setup илгээхэд алдаа:', error);
-        }
-      }
 
 
       // Check for updates after successful login

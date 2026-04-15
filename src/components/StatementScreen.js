@@ -1,382 +1,159 @@
 import React, {useEffect, useRef, useState} from 'react';
 import './StatementScreen.css';
 import {getTokenAndStore, getTransactions} from '../services/apiService';
-import io from 'socket.io-client';
 import DesktopService from '../services/desktopService';
-import {API_CONFIG} from '../utils/constants';
 import authService from '../services/authService';
+import socketService from '../services/socketService';
 
 const desktopService = new DesktopService();
 
 const StatementScreen = ({
-  onBack,
-  username,
-  firstName,
-  lastName,
-  customerBankAccount,
-  customer,
-  theme = 'light'
-}) => {
-  const [amount, setAmount] = useState('₮ 0');
-  const [transactions, setTransactions] = useState([]);
-  const [totalAmount, setTotalAmount] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [contractInfo, setContractInfo] = useState(null);
-  const [socketConnected, setSocketConnected] = useState(false);
-  const [newTransactionsCount, setNewTransactionsCount] = useState(0);
-  const [animatedTransactions, setAnimatedTransactions] = useState(new Set());
-  const [tokenResult, setTokenResult] = useState(null);
-  const [showAmount, setShowAmount] = useState(false); // Дансны дүнг нууцлах/харуулах
+                             onBack,
+                             username,
+                             firstName,
+                             lastName,
+                             customerBankAccount,
+                             customer,
+                             theme = 'light'
+                         }) => {
+    const [amount, setAmount] = useState('₮ 0');
+    const [transactions, setTransactions] = useState([]);
+    const [totalAmount, setTotalAmount] = useState(0);
+    const [loading, setLoading] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
+    const [socketConnected, setSocketConnected] = useState(false);
+    const [newTransactionsCount, setNewTransactionsCount] = useState(0);
+    const [animatedTransactions, setAnimatedTransactions] = useState(new Set());
+    const [tokenResult, setTokenResult] = useState(null);
+    const [showAmount, setShowAmount] = useState(false);
 
-  // Socket reference
-  const socketRef = useRef(null);
-  // Track if fetchAccountAndAmount is currently running to prevent duplicate calls
-  const fetchingRef = useRef(false);
-  // Polling interval reference
-  const pollingIntervalRef = useRef(null);
+    const fetchingRef = useRef(false);
+    const captchaOpenRef = useRef(false);
 
-  // Transaction-уудын нийлбэрийг тооцоолох функц
-  const calculateTotalAmount = (transactions) => {
-    const total = transactions.reduce((sum, transaction) => {
-      const amount = parseFloat(transaction.amount) || 0;
-      return sum + amount;
-    }, 0);
-    return total;
-  };
+    // ─── Helper ────────────────────────────────────────────────
 
-  // Socket disconnect функц
-  const disconnectAllConnections = () => {
-    console.log('🔌 Бүх connection-уудыг зогсоож байна...');
-    captchaOpenRef.current = false;
-    // Polling зогсоох
-    stopPolling();
-
-    // Socket disconnect
-    if (socketRef.current) {
-      console.log('🔌 Socket disconnect хийж байна...');
-      try {
-        // Clear all event listeners first
-        if (typeof socketRef.current.removeAllListeners === 'function') {
-          socketRef.current.removeAllListeners();
-        }
-        
-        // Socket.io client-д disconnect() функц байдаг
-        if (typeof socketRef.current.disconnect === 'function') {
-          socketRef.current.disconnect();
-        } else {
-          console.log('⚠️ Socket disconnect функц байхгүй, close() ашиглаж байна');
-          if (typeof socketRef.current.close === 'function') {
-            socketRef.current.close();
-          }
-        }
-        socketRef.current = null;
-        setSocketConnected(false);
-      } catch (error) {
-        console.error('❌ Socket disconnect алдаа:', error);
-        // Force cleanup even if there's an error
-        socketRef.current = null;
-        setSocketConnected(false);
-      }
-    }
-
-    // Global socket disconnect (main process)
-    if (window.electron && window.electron.disconnectSocket) {
-      console.log('🔌 Global socket disconnect хийж байна...');
-      try {
-        window.electron.disconnectSocket();
-      } catch (error) {
-        console.error('❌ Global socket disconnect алдаа:', error);
-      }
-    }
-
-    // Clear all timers and intervals
-    console.log('🧹 Бүх timer-уудыг цэвэрлэж байна...');
-
-    console.log('✅ Бүх connection-ууд зогсоогдлоо');
-  };
-
-  // Back button handler
-  const handleBack = async () => {
-    try {
-      await window.electron.invoke('close-captcha-window');
-    } catch (error) {
-      console.error('❌ CAPTCHA цонх хаахад алдаа:', error);
-    }
-    console.log('⬅️ Back button дарагдаж байна...');
-    disconnectAllConnections();
-    onBack();
-  };
-
-  // Socket connection setup with debounce
-  useEffect(() => {
-    let socketSetupTimeout;
-    
-    if (customerBankAccount?.userId || customerBankAccount?.UserId) {
-      const userId = customerBankAccount.userId || customerBankAccount.UserId;
-      console.log('🔌 Socket холболт эхлүүлж байна:', userId);
-
-      // Debounce socket setup to prevent multiple connections
-      socketSetupTimeout = setTimeout(async () => {
-        // Get correct API URL for socket connection
-        const getSocketUrl = () => {
-          // Check if we're in Electron environment
-          if (typeof window !== 'undefined' && window.electron) {
-            // Check environment to determine API URL
-            const isDevelopment = process.env.NODE_ENV === 'development' || 
-                                 (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
-            
-            if (isDevelopment) {
-              return 'http://localhost:3101';
-            } else {
-              return 'http://103.168.56.34:3101';
-            }
-          }
-          
-          // In browser environment (non-Electron), check if we're on localhost
-          if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
-            const isRealDevelopment = process.env.NODE_ENV === 'development' && 
-                                      !process.execPath.includes('electron');
-            
-            if (isRealDevelopment && 
-                (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-              return 'http://localhost:3101';
-            }
-          }
-
-          // Use production URL or configured URL
-          return API_CONFIG.BASE_URL;
-        };
-
-        // Socket холболт үүсгэх
-        const getSocketConnection = async () => {
-          try {
-            const socketUrl = getSocketUrl();
-            console.log('🔌 User-specific socket холболт үүсгэж байна:', socketUrl, 'userId:', userId);
-            
-            return io(socketUrl, {
-              query: { userId: userId }, // ✅ User ID-тай query parameter
-              transports: ['polling']
-            });
-          } catch (error) {
-            console.error('❌ Socket connection үүсгэхэд алдаа:', error);
-            return null;
-          }
-        };
-
-        getSocketConnection().then(socket => {
-          socketRef.current = socket;
-
-          // Socket events
-          socketRef.current.on('connect', () => {
-            console.log('✅ User-specific socket холбогдлоо:', socketRef.current.id);
-            setSocketConnected(true);
-
-            // Socket холбогдсон үед polling зогсоох
-            stopPolling();
-
-            // userId-тай room-д нэгдэх (server талд автоматаар join хийгддэг)
-            socketRef.current.emit('joinRoom', { userId });
-            console.log('🏠 User-specific room-д нэгдлээ:', userId);
-            
-            // CAPTCHA setup илгээх (хэрэв шаардлагатай бол)
-            if (customerBankAccount?.IsCitizen !== undefined) {
-              socketRef.current.emit('captcha-setup', {
-                userOid: userId,
-                isCitizen: customerBankAccount.IsCitizen
-              });
-              console.log('📤 CAPTCHA setup илгээгдлээ:', { userOid: userId, isCitizen: customerBankAccount.IsCitizen });
-            }
-          });
-
-          socketRef.current.on('disconnect', () => {
-            console.log('❌ Socket холболт тасарлаа');
-            setSocketConnected(false);
-            
-            // Socket салсан үед polling асаах
-            if (!pollingIntervalRef.current) {
-              console.log('▶️ Socket салсан тул polling асаж байна...');
-              startPolling();
-            }
-          });
-
-          // Шинэ transaction-ууд ирэх үед (backend дээр filter хийгдсэн)
-          socketRef.current.on('newTransactions', (data) => {
-            console.log('🆕 User-specific socket-оор шинэ transaction-ууд ирлээ:', data);
-            
-            // Socket-оор transaction ирээд байвал polling зогсоох
-            stopPolling();
-
-            // User-specific filter шалгах
-            if (data.data && data.data.userOid && data.data.userOid !== userId) {
-              console.log('⚠️ Бусад хэрэглэгчийн transaction ирлээ, алгасах:', data.data.userOid, 'vs', userId);
-              return;
-            }
-
-            if (data.data && data.data.transactions) {
-              const newTransactions = data.data.transactions;
-
-              console.log(`📊 User-specific filter хийгдсэн transaction-ууд: ${newTransactions.length}`);
-              
-              if (newTransactions.length > 0) {
-                console.log('✅ Энэ хэрэглэгчийн transaction-ууд олдлоо:', newTransactions.map(t => ({
-                  id: t.id,
-                  amount: t.amount,
-                  from: t.from,
-                  to: t.to,
-                  date: t.date,
-                  userOid: data.data.userOid
-                })));
-              } else {
-                console.log('ℹ️ Энэ хэрэглэгчийн шинэ transaction байхгүй байна');
-              }
-
-              // Шинэ transaction-уудыг нэмэх
-              setTransactions(prevTransactions => {
-                // Хуучин transaction-уудтай давхцахгүй байх
-                const existingIds = new Set(prevTransactions.map(t => `${t.amount}-${t.from}-${t.date}`));
-                const uniqueNewTransactions = newTransactions.filter(t =>
-                  !existingIds.has(`${t.amount}-${t.from}-${t.date}`)
-                );
-
-                if (uniqueNewTransactions.length > 0) {
-                  console.log('🆕 Шинэ transaction-ууд нэмэгдлээ:', uniqueNewTransactions.length);
-                  
-                  setNewTransactionsCount(prev => prev + uniqueNewTransactions.length);
-
-                  // Шинэ transaction-уудыг animation-д нэмэх
-                  const newTransactionIds = uniqueNewTransactions.map(t => `${t.amount}-${t.from}-${t.date}`);
-                  setAnimatedTransactions(prev => new Set([...prev, ...newTransactionIds]));
-
-                  // 3 секундын дараа шинэ transaction count-ыг reset хийх
-                  setTimeout(() => setNewTransactionsCount(0), 3000);
-
-                  // 5 секундын дараа animation-ыг арилгах
-                  setTimeout(() => {
-                    setAnimatedTransactions(prev => {
-                      const newSet = new Set(prev);
-                      newTransactionIds.forEach(id => newSet.delete(id));
-                      return newSet;
-                    });
-                  }, 5000);
-
-                  const newTransactionList = [...uniqueNewTransactions, ...prevTransactions];
-
-                  // Нийлбэрийг шинэчлэх
-                  const newTotal = calculateTotalAmount(newTransactionList);
-                  setTotalAmount(newTotal);
-                  console.log('💰 Шинэ transaction нийлбэр:', newTotal.toLocaleString());
-
-                  // Notification харуулах (filtered transactions-ын тоогоор)
-                  showNewTransactionNotification(uniqueNewTransactions.length);
-
-                  return newTransactionList;
-                }
-
-                return prevTransactions;
-              });
-            }
-          });
-
-          // Token expired event listener
-          socketRef.current.on('tokenExpired', (data) => {
-            console.log('⚠️ Token expired event ирлээ:', data);
-            setErrorMessage('Token дууссан байна, дахин нэвтрэх шаардлагатай');
-            
-            // Socket холболтыг таслах
-            if (socketRef.current) {
-              socketRef.current.disconnect();
-              setSocketConnected(false);
-            }
-          });
-
-          // CAPTCHA update event listener
-          socketRef.current.on('captcha-update', async (result) => {
-            console.log('🎉 Socket-оор CAPTCHA update event ирлээ:', result);
-
-            if (result.success && result.captchaDone) {
-              console.log('✅ CAPTCHA амжилттай болсон! fetchAccountAndAmount дуудаж байна...');
-
-                // *** ЧУХАЛ: captchaOpenRef-г цэвэрлэх ***
-                captchaOpenRef.current = false;
-
-                // 2 секундын дараа fetchAccountAndAmount дуудах (CAPTCHA cookies хадгалагдахыг хүлээх)
-                setTimeout(async () => {
-                  await tokenRefresh();
-                }, 2000);
-            }
-          });
-        });
-      }, 1000); // 1 second debounce
-    }
-
-    // Cleanup function
-    return () => {
-      if (socketSetupTimeout) {
-        clearTimeout(socketSetupTimeout);
-      }
-      // Polling зогсоох
-      stopPolling();
-      if (socketRef.current) {
-        console.log('🔌 Socket холболт хааж байна');
-        try {
-          // Socket.io client-д disconnect() функц байдаг
-          if (typeof socketRef.current.disconnect === 'function') {
-            socketRef.current.disconnect();
-          } else if (typeof socketRef.current.close === 'function') {
-            socketRef.current.close();
-          }
-          // Clear all event listeners
-          socketRef.current.removeAllListeners();
-        } catch (error) {
-          console.error('❌ Socket cleanup алдаа:', error);
-        } finally {
-          socketRef.current = null;
-        }
-      }
+    const calculateTotalAmount = (txList) => {
+        return txList.reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0), 0);
     };
-  }, [customerBankAccount]);
 
-  // Шинэ transaction notification харуулах
-  const showNewTransactionNotification = (count) => {
-    // Browser notification харуулах
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('Шинэ гүйлгээ', {
-        body: `${count} шинэ гүйлгээ ирлээ`,
-       // icon: '/favicon.ico',
-       // badge: '/favicon.ico',
-        tag: 'novaq-transaction'
-      });
-    }
+    // ─── Socket setup (нэг удаа) ──────────────────────────────
 
-    // Console-д мэдээлэл
-    console.log(`🆕 ${count} шинэ гүйлгээ ирлээ!`);
-  };
+    useEffect(() => {
+        const userId = customerBankAccount?.userId || customerBankAccount?.UserId;
+        if (!userId) return;
 
-  // Notification permission авах
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
+        console.log('[StatementScreen] Socket холболт эхлүүлж байна:', userId);
 
-// Fetch account and amount — CAPTCHA нээлттэй бол алгасна
+        // 1. Socket холбогдох
+        socketService.connect(userId, customerBankAccount?.IsCitizen);
+
+        // 2. Холболтын төлөв
+        socketService.onConnectChange((connected) => {
+            setSocketConnected(connected);
+        });
+
+        // 3. Шинэ гүйлгээ (server TransactionPoller-ээс)
+        socketService.onNewTransactions((data) => {
+            if (!data?.data?.transactions) return;
+
+            // User шалгалт
+            if (data.data.userOid && data.data.userOid !== userId) return;
+
+            const incoming = data.data.transactions;
+            if (incoming.length === 0) return;
+
+            setTransactions(prev => {
+                const existingIds = new Set(prev.map(t => `${t.amount}-${t.from}-${t.date}`));
+                const unique = incoming.filter(t => !existingIds.has(`${t.amount}-${t.from}-${t.date}`));
+
+                if (unique.length === 0) return prev;
+
+                console.log(`🆕 ${unique.length} шинэ гүйлгээ ирлээ`);
+
+                // Animation
+                const newIds = unique.map(t => `${t.amount}-${t.from}-${t.date}`);
+                setAnimatedTransactions(prev => new Set([...prev, ...newIds]));
+                setNewTransactionsCount(prev => prev + unique.length);
+
+                setTimeout(() => setNewTransactionsCount(0), 3000);
+                setTimeout(() => {
+                    setAnimatedTransactions(prev => {
+                        const s = new Set(prev);
+                        newIds.forEach(id => s.delete(id));
+                        return s;
+                    });
+                }, 5000);
+
+                const merged = [...unique, ...prev];
+                const total = calculateTotalAmount(merged);
+                setTotalAmount(total);
+
+                // Notification
+                showNewTransactionNotification(unique.length);
+
+                return merged;
+            });
+        });
+
+        // 4. CAPTCHA дууссан (server captcha-listener-ээс)
+        socketService.onCaptchaDone((result) => {
+            console.log('[StatementScreen] CAPTCHA дууслаа');
+            captchaOpenRef.current = false;
+            setErrorMessage('');
+            // Server poller автомат эхэлнэ — client дуудлага хэрэггүй
+        });
+
+        // 5. CAPTCHA шаардлагатай (server poller илрүүлсэн)
+        socketService.onCaptchaRequired((data) => {
+            console.log('[StatementScreen] CAPTCHA шаардлагатай:', data?.message);
+            setErrorMessage(data?.message || 'CAPTCHA шаардлагатай');
+            showCaptchaWindow().then();
+        });
+
+        // 6. Token дууссан
+        socketService.onTokenExpired(() => {
+            setErrorMessage('Token дууссан байна, дахин нэвтрэх шаардлагатай');
+        });
+
+        // Cleanup
+        return () => {
+            console.log('[StatementScreen] Socket disconnect');
+            socketService.disconnect();
+        };
+    }, [customerBankAccount]);
+
+    // ─── Notification ──────────────────────────────────────────
+
+    useEffect(() => {
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }, []);
+
+    const showNewTransactionNotification = (count) => {
+        if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Шинэ гүйлгээ', {
+                body: `${count} шинэ гүйлгээ ирлээ`,
+                tag: 'novaq-transaction'
+            });
+        }
+    };
+
+    // ─── Fetch (зөвхөн гар аргаар: mount + Сэргээх товч) ─────
+
     const fetchAccountAndAmount = async () => {
-        // CAPTCHA нээлттэй үед дуудахгүй
         if (captchaOpenRef.current) {
-            console.log('⚠️ CAPTCHA нээлттэй байгаа тул fetchAccountAndAmount алгасах');
+            console.log('⚠️ CAPTCHA нээлттэй, алгасах');
             return;
         }
-
         if (fetchingRef.current) {
-            console.log('⚠️ fetchAccountAndAmount аль хэдийн ажиллаж байна');
+            console.log('⚠️ Аль хэдийн ажиллаж байна');
             return;
         }
 
         fetchingRef.current = true;
         try {
-            console.log('🔍 fetchAccountAndAmount дуудагдаж байна');
             const response = await getTransactions();
 
             if (response.needCaptcha) {
@@ -391,61 +168,45 @@ const StatementScreen = ({
             }
 
             switch (data.code) {
-                case 'OK': {
-                    console.log('✅ Transaction амжилттай:', { count: data.transactions?.length ?? 0 });
+                case 'OK':
                     setErrorMessage('');
-
                     if (data.transactions) {
                         setTransactions(data.transactions);
-                        const total = calculateTotalAmount(data.transactions);
-                        setTotalAmount(total);
+                        setTotalAmount(calculateTotalAmount(data.transactions));
                     }
-
                     if (data.account) {
                         setAmount(`₮ ${data.account.toLocaleString()}`);
                     }
                     break;
-                }
 
-                case 'CAPTCHA_PENDING': {
-                    console.log('🔒 CAPTCHA шаардлагатай:', data.message);
+                case 'CAPTCHA_PENDING':
                     setErrorMessage(data.message || 'CAPTCHA шаардлагатай');
                     showCaptchaWindow();
-
                     if (data.transactions?.length > 0) {
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
                     }
                     break;
-                }
 
-                case 'REGISTER_DEVICE': {
-                    console.log('📱 Төхөөрөмж таниулах:', data.message);
+                case 'REGISTER_DEVICE':
                     setErrorMessage(data.message || 'Шинээр төхөөрөмж таниулах шаардлагатай');
                     showCaptchaWindow();
                     break;
-                }
 
                 case 'BANK_ERROR':
-                case 'CONNECTION_ERROR': {
-                    console.log('⚠️ Банкны алдаа:', data.message);
+                case 'CONNECTION_ERROR':
                     setErrorMessage(data.message || 'Банкны серверийн алдаа');
                     break;
-                }
 
-                case 'TOKEN_EXPIRED': {
-                    console.log('🔑 Token дууссан:', data.message);
+                case 'TOKEN_EXPIRED':
                     setErrorMessage(data.message || 'Token дууссан байна');
                     break;
-                }
 
-                case 'NO_ACCOUNT': {
-                    console.log('❌ Данс олдсонгүй:', data.message);
+                case 'NO_ACCOUNT':
                     setErrorMessage(data.message || 'Bank account олдсонгүй');
                     break;
-                }
 
-                default: {
+                default:
                     // Legacy формат
                     if (data.captchaPending) {
                         setErrorMessage(data.bankMessage || 'CAPTCHA шаардлагатай');
@@ -461,54 +222,41 @@ const StatementScreen = ({
                         }
                     }
                     break;
-                }
             }
-
-        } catch (transactionError) {
-            console.error('❌ getTransactions алдаа:', transactionError);
+        } catch (err) {
+            console.error('❌ getTransactions алдаа:', err);
             setErrorMessage('Гүйлгээний мэдээлэл авахад алдаа гарлаа');
         } finally {
             fetchingRef.current = false;
         }
     };
 
+    // ─── Token refresh ─────────────────────────────────────────
 
     const tokenRefresh = async () => {
-        if (captchaOpenRef.current) {
-            console.log('⚠️ CAPTCHA нээлттэй байгаа тул tokenRefresh алгасах');
-            return;
-        }
+        if (captchaOpenRef.current) return;
 
         setLoading(true);
         setErrorMessage('');
 
         try {
-            console.log('🔄 tokenRefresh дуудагдаж байна');
-
             if (customerBankAccount?.bankUserName && customerBankAccount?.bankPassword) {
-                const tokenResult = await getTokenAndStore(customerBankAccount.customerId || customerBankAccount.CustomerId);
-                setTokenResult(tokenResult);
+                const result = await getTokenAndStore(
+                    customerBankAccount.customerId || customerBankAccount.CustomerId
+                );
+                setTokenResult(result);
 
-                if (tokenResult.isDuplicate) {
-                    console.log('⚠️ Duplicate getTokenAndStore, алгасах');
-                    return;
-                }
+                if (result.isDuplicate) return;
 
-                if (tokenResult.success) {
+                if (result.success) {
                     await fetchAccountAndAmount();
                 } else {
-                    console.log('❌ Token авахад алдаа:', tokenResult.errorMessage);
-
-                    if (tokenResult.needCaptcha) {
-                        showCaptchaWindow();
-                    }
-                    setErrorMessage(tokenResult.errorMessage || 'Token авахад алдаа гарлаа');
+                    if (result.needCaptcha) showCaptchaWindow();
+                    setErrorMessage(result.errorMessage || 'Token авахад алдаа гарлаа');
                 }
             } else {
-                console.log('⚠️ Bank credentials олдсонгүй');
                 showCaptchaWindow();
             }
-
         } catch (error) {
             console.error('❌ tokenRefresh алдаа:', error);
             setErrorMessage('Token шинэчлэхэд алдаа гарлаа');
@@ -517,367 +265,252 @@ const StatementScreen = ({
         }
     };
 
-    const captchaOpenRef = useRef(false);
+    // ─── CAPTCHA ───────────────────────────────────────────────
 
     const showCaptchaWindow = async () => {
-        // Аль хэдийн нээлттэй бол дахин нээхгүй
         if (captchaOpenRef.current) {
-            console.log('⚠️ CAPTCHA цонх аль хэдийн нээлттэй, алгасах');
+            console.log('⚠️ CAPTCHA аль хэдийн нээлттэй');
             return;
         }
 
-        console.log('🔄 CAPTCHA цонх нээж байна...');
         captchaOpenRef.current = true;
-
-        // CAPTCHA нээлттэй үед polling зогсоох
-        stopPolling();
 
         try {
             await desktopService.clearKhanBankCookiesFromServer(['all_cookies']);
-            const result = await window.electron.createCaptchaWindow(customerBankAccount.isCitizen);
-            console.log('✅ CAPTCHA цонх нээгдлээ:', result);
-        } catch (captchaError) {
-            console.error('❌ CAPTCHA нээхэд алдаа:', captchaError);
+            await window.electron.createCaptchaWindow(customerBankAccount.isCitizen);
+        } catch (err) {
+            console.error('❌ CAPTCHA нээхэд алдаа:', err);
             setErrorMessage('CAPTCHA нээхэд алдаа гарлаа');
-            captchaOpenRef.current = false; // Алдаа гарвал flag цэвэрлэх
+            captchaOpenRef.current = false;
         }
     };
 
+    // ─── Disconnect ────────────────────────────────────────────
 
-    // Polling функцийг эхлүүлэх (socket салсан үед)
-    // Polling — CAPTCHA нээлттэй бол эхлүүлэхгүй
-    const startPolling = () => {
-        if (socketConnected || captchaOpenRef.current || pollingIntervalRef.current) {
-            return;
+    const disconnectAll = () => {
+        captchaOpenRef.current = false;
+        socketService.disconnect();
+
+        if (window.electron?.disconnectSocket) {
+            try { window.electron.disconnectSocket(); } catch (_) {}
         }
-
-        console.log('▶️ Polling эхлүүлж байна (30 секунд)...');
-        fetchAccountAndAmount();
-
-        pollingIntervalRef.current = setInterval(() => {
-            if (captchaOpenRef.current) {
-                console.log('⏸️ CAPTCHA нээлттэй тул polling алгасах');
-                return;
-            }
-            if (!socketConnected && !fetchingRef.current) {
-                fetchAccountAndAmount();
-            } else if (socketConnected) {
-                stopPolling();
-            }
-        }, 30000);
     };
 
-  // Polling функцийг зогсоох
-  const stopPolling = () => {
-    if (pollingIntervalRef.current) {
-      console.log('⏸️ Polling зогсоож байна...');
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-    }
-  }
+    // ─── Handlers ──────────────────────────────────────────────
 
-  // Handle refresh
-  const handleRefresh = async () => {
-    if (refreshing) return;
-    setRefreshing(true);
-    setErrorMessage('');
-    try {
-      await fetchAccountAndAmount();
-    } catch (error) {
-      setErrorMessage('Шинэчлэх үед алдаа гарлаа');
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  // Handle quit app
-
-
-
-  const handleQuitApp = async () => {
-    try {
-      console.log('❌ Quit app дарагдаж байна...');
-      // Бүх connection-уудыг зогсоох
-      disconnectAllConnections();
-      const computerNameResponse = await window.electron.invoke('get-computer-name');
-      const computerName = typeof computerNameResponse === 'string' ? computerNameResponse : 'Unknown';
-      authService.saveLogoutHistory({
-        userName: username,
-        computerName: computerName,
-        DesktopVersion: require('../../package.json').version
-      } );
-      const result = await window.electron.invoke('close-app', { userName: username, computerName: computerName });
-    } catch (error) {
-      console.error('❌ Quit app алдаа:', error);
-    }
-  };
-
-  // Component mount үед зөвхөн нэг удаа дуудах
-  useEffect(() => {
-    // Component mount үед зөвхөн нэг удаа дуудах
-    const initializeData = async () => {
-      try {
-        await tokenRefresh();
-        
-        // Socket холбогдохгүй бол polling эхлүүлэх
-        // Socket connect event дээр polling зогсоох тул энд эхлүүлэх
-        setTimeout(() => {
-          if (!socketConnected) {
-            startPolling();
-          }
-        }, 2000); // 2 секундын дараа шалгах (socket холбогдохыг хүлээх)
-      } catch (error) {
-        console.error('❌ Initial data fetch алдаа:', error);
-      }
+    const handleBack = async () => {
+        try {
+            await window.electron.invoke('close-captcha-window');
+        } catch (_) {}
+        disconnectAll();
+        onBack();
     };
 
-    initializeData();
-  }, []); // Empty dependency array - зөвхөн нэг удаа
+    const handleRefresh = async () => {
+        if (refreshing) return;
+        setRefreshing(true);
+        setErrorMessage('');
+        try {
+            await fetchAccountAndAmount();
+        } catch (_) {
+            setErrorMessage('Шинэчлэх үед алдаа гарлаа');
+        } finally {
+            setRefreshing(false);
+        }
+    };
 
-  // Apply theme when component mounts or theme changes
-  useEffect(() => {
-    if (document.querySelector('.mobile-container')) {
-      const mobileContainer = document.querySelector('.mobile-container');
-      mobileContainer.className = `mobile-container ${theme}`;
-    }
-  }, [theme]);
+    const handleQuitApp = async () => {
+        try {
+            disconnectAll();
+            const computerNameResponse = await window.electron.invoke('get-computer-name');
+            const computerName = typeof computerNameResponse === 'string' ? computerNameResponse : 'Unknown';
+            authService.saveLogoutHistory({
+                userName: username,
+                computerName,
+                DesktopVersion: require('../../package.json').version
+            });
+            await window.electron.invoke('close-app', { userName: username, computerName });
+        } catch (error) {
+            console.error('❌ Quit app алдаа:', error);
+        }
+    };
 
-  return (
-    <>
-      <div className={`mobile-container ${theme}`} data-theme={theme}>
-        {/* Header */}
-        <div className="mobile-header">
-          <div className="control-buttons">
-            <div className="right-buttons">
+    // ─── Init (нэг удаа) ──────────────────────────────────────
+
+    useEffect(() => {
+        tokenRefresh();
+    }, []);
+
+    // ─── Theme ─────────────────────────────────────────────────
+
+    useEffect(() => {
+        const el = document.querySelector('.mobile-container');
+        if (el) el.className = `mobile-container ${theme}`;
+    }, [theme]);
+
+    // ─── Render ────────────────────────────────────────────────
+
+    return (
+        <>
+            <div className={`mobile-container ${theme}`} data-theme={theme}>
+                {/* Header */}
+                <div className="mobile-header">
+                    <div className="control-buttons">
+                        <div className="right-buttons">
               <span className="back-button" onClick={handleBack}>
                 <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="9" cy="9" r="9"
-                    fill="white" fillOpacity="0.15" />
-
+                  <circle cx="9" cy="9" r="9" fill="white" fillOpacity="0.15" />
                   <path d="M12 9H6M6 9L9 6M6 9L9 12" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </span>
-              <span className="control-button" onClick={handleQuitApp}>
+                            <span className="control-button" onClick={handleQuitApp}>
                 <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <circle cx="9" cy="9" r="9" fill="white" fillOpacity="0.15" />
                   <path d="M5.5 5.5L12.5 12.5M12.5 5.5L5.5 12.5" stroke="white" strokeWidth="2" strokeLinecap="round" />
                 </svg>
               </span>
-            </div>
-          </div>
-          <div>
-            <div className="user-greeting">
-              <div className={`status-indicator ${socketConnected ? 'connected' : 'disconnected'}`}>
-                <span className="status-dot"></span>
-              </div>
+                        </div>
+                    </div>
+                    <div>
+                        <div className="user-greeting">
+                            <div className={`status-indicator ${socketConnected ? 'connected' : 'disconnected'}`}>
+                                <span className="status-dot"></span>
+                            </div>
+                            <span className="greeting-text">Сайн уу?</span>
+                        </div>
+                        <div className="name-greeting">
+                            <span className="greeting-name">{firstName}</span>{' '}
+                            <span className="greeting-lastname">{lastName}</span><br />
+                        </div>
+                    </div>
+                    <div className="title">Дансны орлого</div>
+                </div>
 
-              <span className="greeting-text">
-                Сайн уу?
-              </span>
-
-            </div>
-            <div className="name-greeting">
-              <span className="greeting-name">{firstName}</span>{' '}
-              <span className="greeting-lastname">{lastName}</span><br />
-            </div>
-          </div>
-
-
-
-          <div className="title">
-            Дансны орлого
-          </div>
-        </div>
-
-        {/* Account box */}
-        <div className="account-box">
-          <span className="account-number">{customerBankAccount?.bankAccountNum || 'Данс олдсонгүй'}</span>
-          <span className="account-amount" style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                {/* Account box */}
+                <div className="account-box">
+                    <span className="account-number">{customerBankAccount?.bankAccountNum || 'Данс олдсонгүй'}</span>
+                    <span className="account-amount" style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
             <span style={{ userSelect: 'none' }}>
-              {showAmount 
-                ? `₮ ${(typeof totalAmount === 'number' ? totalAmount : 0).toLocaleString('mn-MN')}`
-                : '₮ ••••••'
+              {showAmount
+                  ? `₮ ${(typeof totalAmount === 'number' ? totalAmount : 0).toLocaleString('mn-MN')}`
+                  : '₮ ••••••'
               }
             </span>
-            <button 
-              type="button"
-              className="Income" 
-              onClick={() => setShowAmount(s => !s)}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                margin: 0,
-                cursor: 'pointer',
-                outline: 'none',
-                boxShadow: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '28px',
-                height: '28px'
-              }}
-              title={showAmount ? 'Нуух' : 'Харах'}
+            <button
+                type="button"
+                className="Income"
+                onClick={() => setShowAmount(s => !s)}
+                style={{
+                    background: 'none', border: 'none', padding: 0, margin: 0,
+                    cursor: 'pointer', outline: 'none', boxShadow: 'none',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: '28px', height: '28px'
+                }}
+                title={showAmount ? 'Нуух' : 'Харах'}
             >
               <svg width="24" height="24" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M9 6V12M9 6L6 9M9 6L12 9" stroke="#0076FF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </span>
-        </div>
+                </div>
 
+                <button
+                    className={`refresh-button ${loading ? 'loading' : ''}`}
+                    onClick={handleRefresh}
+                    disabled={loading}
+                >
+                    {loading ? (
+                        <>
+                            <span className="loading-spinner">⚡</span>
+                            Уншиж байна...
+                        </>
+                    ) : (
+                        'Сэргээх (F4)'
+                    )}
+                </button>
 
+                {errorMessage && amount === '₮ 0' && (
+                    <div className="error-message">{errorMessage}</div>
+                )}
 
-        <button
-          className={`refresh-button ${loading ? 'loading' : ''}`}
-          onClick={handleRefresh}
-          disabled={loading}
-        >
-          {loading ? (
-            <>
-              <span className="loading-spinner">⚡</span>
-              Уншиж байна...
-            </>
-          ) : (
-            'Сэргээх (F4)'
-          )}
-        </button>
+                <div className="main-content">
+                    <div className="scroll-container" data-scroll-container>
+                        <ul className="transactions-list">
+                            {transactions.length === 0 && !loading && (
+                                <li className="no-transactions">Гүйлгээ олдсонгүй.</li>
+                            )}
+                            {transactions
+                                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                                .map((item, idx) => {
+                                    const txId = `${item.amount}-${item.from}-${item.date}`;
+                                    const isNew = animatedTransactions.has(txId);
+                                    return (
+                                        <li key={idx} className={`transaction-item ${isNew ? 'new-transaction' : ''}`}>
+                                            <div className="transaction-content">
+                                                <div className="transaction-amount">{item.amount?.toLocaleString()}</div>
+                                                <div className="transaction-details">
+                                                    <div className="transaction-from">{item.from}</div>
+                                                    <div className="transaction-date">{item.date}</div>
+                                                </div>
+                                            </div>
+                                            {isNew && <div className="new-transaction-indicator">🆕 Шинэ</div>}
+                                        </li>
+                                    );
+                                })}
+                        </ul>
+                    </div>
+                </div>
+            </div>
 
-        {errorMessage && amount === '₮ 0' && (
-          <div className="error-message">
-            {errorMessage}
-          </div>
-        )}
-
-        <div className="main-content">
-          <div className="scroll-container" data-scroll-container>
-            <ul className="transactions-list">
-              {transactions.length === 0 && !loading && (
-                <li className="no-transactions">
-                  Гүйлгээ олдсонгүй.
-                </li>
-              )}
-              {transactions
-                .sort((a, b) => new Date(b.date) - new Date(a.date))
-                .map((item, idx) => {
-                  const transactionId = `${item.amount}-${item.from}-${item.date}`;
-                  const isNew = animatedTransactions.has(transactionId);
-
-                  return (
-                    <li key={idx} className={`transaction-item ${isNew ? 'new-transaction' : ''}`}>
-                      <div className="transaction-content">
-                        <div className="transaction-amount">
-                          {item.amount?.toLocaleString()}
-                        </div>
-                        <div className="transaction-details">
-                          <div className="transaction-from">
-                            {item.from}
-                          </div>
-                          <div className="transaction-date">
-                            {item.date}
-                          </div>
-                        </div>
-                      </div>
-                      {isNew && (
-                        <div className="new-transaction-indicator">
-                          🆕 Шинэ
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-            </ul>
-          </div>         
-        </div>
-       
-      </div>
-        <div 
-        className="footer" style={{ position: 'fixed', bottom: 0, left: 0, right: 0, backgroundColor: '#f5f5f5', padding: '10px', textAlign: 'center', borderTop: '1px solid #ddd', zIndex: 1000 }}>
-          {`@bto softline llc ${process.env.APP_VERSION}`}
-          {customer && (() => {
-            // contractEndDate байхгүй бол харуулахгүй
-            const today = new Date();
-            const endDate = customer.contractEndDate ? new Date(customer.contractEndDate) : null;
-            const diffTime = endDate ? endDate - today : 0;
-            const daysLeft = endDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
-            // 6 буюу түүнээс дээш хоног үлдсэн бол contract info харуулахгүй
-            if (daysLeft >= 6) return null;
-            return <ContractInfoDisplay customer={customer} />;
-          })()}
-        </div>
-    </>
-  );
+            <div className="footer" style={{
+                position: 'fixed', bottom: 0, left: 0, right: 0,
+                backgroundColor: '#f5f5f5', padding: '10px', textAlign: 'center',
+                borderTop: '1px solid #ddd', zIndex: 1000
+            }}>
+                {`@bto softline llc ${process.env.APP_VERSION}`}
+                {customer && (() => {
+                    const today = new Date();
+                    const endDate = customer.contractEndDate ? new Date(customer.contractEndDate) : null;
+                    const diffTime = endDate ? endDate - today : 0;
+                    const daysLeft = endDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
+                    if (daysLeft >= 6) return null;
+                    return <ContractInfoDisplay customer={customer} />;
+                })()}
+            </div>
+        </>
+    );
 };
 
-// Contract Info Display Component
+// ─── Contract Info Display ───────────────────────────────────
+
 const ContractInfoDisplay = ({ customer }) => {
-  const today = new Date();
-  const endDate = customer.contractEndDate ? new Date(customer.contractEndDate) : null;
-  const diffTime = endDate ? endDate - today : 0;
-  const daysLeft = endDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
+    const today = new Date();
+    const endDate = customer.contractEndDate ? new Date(customer.contractEndDate) : null;
+    const diffTime = endDate ? endDate - today : 0;
+    const daysLeft = endDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
 
-  const getContractStatus = (days) => {
-      if (days == 5) return {
-        background: '#fff',
-        color: '#0076FF',
-        message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`,
-        icon: '🖐️'
-      };
-    if (days == 4) return {
-      background: '#fff',
-      color: '#2e7d32',
-      message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`,
-      icon: '🖖'
+    const getContractStatus = (days) => {
+        if (days === 5) return { color: '#0076FF', message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`, icon: '🖐️' };
+        if (days === 4) return { color: '#2e7d32', message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`, icon: '🖖' };
+        if (days === 3) return { color: '#F1C232', message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`, icon: '🤟' };
+        if (days === 2) return { color: '#f57c00', message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`, icon: '✌️' };
+        if (days === 1) return { color: '#F44336', message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`, icon: '☝️' };
+        if (days > 0) return { color: '#d32f2f', message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`, icon: '👆' };
+        return { color: '#721c24', message: 'Гэрээ дууссан', icon: '❌' };
     };
-    if (days == 3) return {
-      background: '#fff',
-      color: '#F1C232',
-      message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`,
-      icon: '🤟'
-    };
-    if (days == 2) return {
-      background: '#fff',
-      color: '#f57c00',
-      message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`,
-      icon: '✌️'
-    };
-    if (days == 1) return {
-      background: '#fff',
-      color: '#F44336',
-      message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`,
-      icon: '☝️'
-    };
-    if (days > 0) return {
-      background: '#fff',
-      color: '#d32f2f',
-      message: `Үйлчилгээний хугацаа дуусахад ${days} хоног үлдсэн`,
-      icon: '👆'
-    };
-    return {
-      background: '#fff',
-      color: '#721c24',
-      message: 'Гэрээ дууссан',
-      icon: '❌'
-    };
-  };
 
-  const { background, color, message, icon } = getContractStatus(daysLeft);
+    const { color, message, icon } = getContractStatus(daysLeft);
 
-  return (
-    <div style={{
-      margin: '12px 16px',
-      padding: '8px 12px',
-      background: background,
-      color: color,
-      borderRadius: '6px',
-      fontSize: '12px',
-      fontWeight: '600',
-      textAlign: 'center',
-      border: `1px solid ${color}20`
-    }}>
-      {icon} {message}
-    </div>
-  );
+    return (
+        <div style={{
+            margin: '12px 16px', padding: '8px 12px', background: '#fff',
+            color, borderRadius: '6px', fontSize: '12px', fontWeight: '600',
+            textAlign: 'center', border: `1px solid ${color}20`
+        }}>
+            {icon} {message}
+        </div>
+    );
 };
 
 export default StatementScreen;

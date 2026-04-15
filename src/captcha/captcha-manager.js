@@ -5,7 +5,6 @@ const { BrowserWindow } = require('electron');
 const path = require('path');
 const WindowsCompatibility = require('../utils/windows7Compat');
 const CookieCollector = require('../socket/cookie-collector');
-const CaptchaSocket = require('../socket/captcha-socket');
 
 const winCompat = new WindowsCompatibility();
 
@@ -13,7 +12,6 @@ class CaptchaManager {
     constructor() {
         this.window = null;
         this.cookieCollector = null;
-        this.captchaSocket = null;
     }
 
     /**
@@ -68,16 +66,6 @@ class CaptchaManager {
                 // CookieCollector эхлүүлэх
                 this.cookieCollector = new CookieCollector(this.window, isCitizen, winCompat);
                 this.cookieCollector.install();
-
-                // Socket холболт
-                this.captchaSocket = new CaptchaSocket(isCitizen);
-                this.captchaSocket.connect();
-
-                // CAPTCHA дуусахад цонх хаах — ЦОРЫН ГАНЦ trigger
-                this.captchaSocket.onCaptchaDone(() => {
-                    console.log('[CaptchaManager] CAPTCHA дууслаа → цонх хааж байна');
-                    this.close();
-                });
             }, delay);
         });
 
@@ -133,10 +121,6 @@ class CaptchaManager {
         if (this.cookieCollector) {
             this.cookieCollector.uninstall();
             this.cookieCollector = null;
-        }
-        if (this.captchaSocket) {
-            this.captchaSocket.disconnect();
-            this.captchaSocket = null;
         }
     }
 
