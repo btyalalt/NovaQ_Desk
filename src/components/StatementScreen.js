@@ -22,6 +22,7 @@ const StatementScreen = ({
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+    const [errorMessageBank, setErrorMessageBank] = useState('');
     const [socketConnected, setSocketConnected] = useState(false);
     const [newTransactionsCount, setNewTransactionsCount] = useState(0);
     const [animatedTransactions, setAnimatedTransactions] = useState(new Set());
@@ -43,10 +44,11 @@ const StatementScreen = ({
         const userId = customerBankAccount?.userId || customerBankAccount?.UserId;
         if (!userId) return;
 
-        console.log('[StatementScreen] Socket холболт эхлүүлж байна:', userId);
+        // console.log(`[StatementScreen] Socket холболт эхлүүлж байна: customerBankAccount :`, customerBankAccount);
+        // console.log('[StatementScreen] Socket холболт эхлүүлж байна:', userId);
 
         // 1. Socket холбогдох
-        socketService.connect(userId, customerBankAccount?.IsCitizen);
+        socketService.connect(userId, customerBankAccount?.isCitizen);
 
         // 2. Холболтын төлөв
         socketService.onConnectChange((connected) => {
@@ -101,7 +103,12 @@ const StatementScreen = ({
             console.log('[StatementScreen] CAPTCHA дууслаа');
             captchaOpenRef.current = false;
             setErrorMessage('');
-            // Server poller автомат эхэлнэ — client дуудлага хэрэггүй
+            try {
+                const closeResult = window.electron.closeCaptchaWindow();
+                console.log('[StatementScreen] closeCaptchaWindow result:', closeResult);
+            } catch (err) {
+                console.error('[StatementScreen] closeCaptchaWindow алдаа:', err);
+            }
         });
 
         // 5. CAPTCHA шаардлагатай (server poller илрүүлсэн)
@@ -120,6 +127,12 @@ const StatementScreen = ({
         return () => {
             console.log('[StatementScreen] Socket disconnect');
             socketService.disconnect();
+
+            // ← Unmount болоход CAPTCHA цонх нээлттэй бол хаах
+            if (captchaOpenRef.current) {
+                captchaOpenRef.current = false;
+                window.electron?.closeCaptchaWindow?.();
+            }
         };
     }, [customerBankAccount]);
 
@@ -141,7 +154,6 @@ const StatementScreen = ({
     };
 
     // ─── Fetch (зөвхөн гар аргаар: mount + Сэргээх товч) ─────
-
     const fetchAccountAndAmount = async () => {
         if (captchaOpenRef.current) {
             console.log('⚠️ CAPTCHA нээлттэй, алгасах');
@@ -163,13 +175,14 @@ const StatementScreen = ({
 
             const { data } = response;
             if (!data) {
-                setErrorMessage('Серверээс хариу ирсэнгүй');
+                setErrorMessage(response.errorMessage || 'Серверээс хариу ирсэнгүй');
                 return;
             }
 
             switch (data.code) {
                 case 'OK':
                     setErrorMessage('');
+                    setErrorMessageBank('');
                     if (data.transactions) {
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
@@ -181,6 +194,7 @@ const StatementScreen = ({
 
                 case 'CAPTCHA_PENDING':
                     setErrorMessage(data.message || 'CAPTCHA шаардлагатай');
+                    setBankResponseError(data.bankResponse);
                     showCaptchaWindow();
                     if (data.transactions?.length > 0) {
                         setTransactions(data.transactions);
@@ -190,20 +204,34 @@ const StatementScreen = ({
 
                 case 'REGISTER_DEVICE':
                     setErrorMessage(data.message || 'Шинээр төхөөрөмж таниулах шаардлагатай');
+                    setBankResponseError(data.bankResponse);
                     showCaptchaWindow();
+                    break;
+
+                case 'PASSWORD_BLOCKED':
+                    setErrorMessage(data.message || 'Нууц үг блоклогдсон');
+                    setBankResponseError(data.bankResponse);
+                    break;
+
+                case 'CONTRACT_EXPIRED':
+                    setErrorMessage(data.message || 'Гэрээний хугацаа дууссан');
+                    setBankResponseError(data.bankResponse);
                     break;
 
                 case 'BANK_ERROR':
                 case 'CONNECTION_ERROR':
                     setErrorMessage(data.message || 'Банкны серверийн алдаа');
+                    setBankResponseError(data.bankResponse);
                     break;
 
                 case 'TOKEN_EXPIRED':
                     setErrorMessage(data.message || 'Token дууссан байна');
+                    setBankResponseError(data.bankResponse);
                     break;
 
                 case 'NO_ACCOUNT':
                     setErrorMessage(data.message || 'Bank account олдсонгүй');
+                    setBankResponseError(data.bankResponse);
                     break;
 
                 default:
@@ -215,6 +243,8 @@ const StatementScreen = ({
                         setErrorMessage(data.bankMessage || 'Төхөөрөмж таниулах');
                         showCaptchaWindow();
                     } else if (data.transactions) {
+                        setErrorMessage('');
+                        setErrorMessageBank('');
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
                         if (data.account) {
@@ -228,6 +258,20 @@ const StatementScreen = ({
             setErrorMessage('Гүйлгээний мэдээлэл авахад алдаа гарлаа');
         } finally {
             fetchingRef.current = false;
+        }
+    };
+
+// ─── Helper: bankResponse-г errorMessageBank-д тохируулах ───
+
+    const setBankResponseError = (bankResponse) => {
+        if (bankResponse && (bankResponse.errorCode || bankResponse.bankMessage)) {
+            const parts = [];
+            if (bankResponse.errorCode) parts.push(bankResponse.errorCode);
+            if (bankResponse.bankMessage) parts.push(bankResponse.bankMessage);
+            if (bankResponse.statusCode) parts.push(`HTTP ${bankResponse.statusCode}`);
+            setErrorMessageBank(parts.join(' : '));
+        } else {
+            setErrorMessageBank('');
         }
     };
 
@@ -252,7 +296,12 @@ const StatementScreen = ({
                     await fetchAccountAndAmount();
                 } else {
                     if (result.needCaptcha) showCaptchaWindow();
+
+
                     setErrorMessage(result.errorMessage || 'Token авахад алдаа гарлаа');
+                    if(result.bankResponse){
+                        setErrorMessageBank(result.bankResponse.errorCode + ' : ' + result.bankResponse.bankMessage)
+                    }
                 }
             } else {
                 showCaptchaWindow();
@@ -274,6 +323,10 @@ const StatementScreen = ({
         }
 
         captchaOpenRef.current = true;
+
+        // ← Server-д captcha-setup илгээх
+        const userId = customerBankAccount?.userId || customerBankAccount?.UserId;
+        socketService.emitCaptchaSetup(userId, customerBankAccount?.isCitizen);
 
         try {
             await desktopService.clearKhanBankCookiesFromServer(['all_cookies']);
@@ -307,6 +360,7 @@ const StatementScreen = ({
     };
 
     const handleRefresh = async () => {
+        console.log('handleRefresh', refreshing)
         if (refreshing) return;
         setRefreshing(true);
         setErrorMessage('');
@@ -314,6 +368,7 @@ const StatementScreen = ({
             await fetchAccountAndAmount();
         } catch (_) {
             setErrorMessage('Шинэчлэх үед алдаа гарлаа');
+            captchaOpenRef.current = false;
         } finally {
             setRefreshing(false);
         }
@@ -430,8 +485,11 @@ const StatementScreen = ({
                     )}
                 </button>
 
-                {errorMessage && amount === '₮ 0' && (
+                {errorMessage && (
                     <div className="error-message">{errorMessage}</div>
+                )}
+                {errorMessage && errorMessageBank && (
+                    <div className="error-message">{errorMessageBank}</div>
                 )}
 
                 <div className="main-content">

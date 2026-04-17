@@ -116,7 +116,9 @@ const LoginScreen = () => {
                   setCustomer(refreshedData.customer);
                 }
                 setUserId(refreshedData.user.username);
-                setIsLoggedIn(true);
+                if (!isLoggedIn) {  // ← нэмэх
+                      setIsLoggedIn(true);
+                }
                 
                 // Хэрэглэгчийн мэдээлэл амжилттай сэргээгдсэн бол login history хадгалах
                 try {

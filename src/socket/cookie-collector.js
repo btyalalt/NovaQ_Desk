@@ -15,7 +15,6 @@ class CookieCollector {
 
     install() {
         if (this.installed) return;
-
         const sess = this.winCompat?.isWindows7
             ? this.captchaWindow.webContents.session
             : session.defaultSession;
@@ -30,8 +29,8 @@ class CookieCollector {
             'https://corp.khanbank.com/api/auth/token',
         ];
         const accountUrls = [
-            'https://e.khanbank.com/v3/omni/accounts*',
-            'https://api.khanbank.com:9003/v3/omni/accounts*',
+            'https://e.khanbank.com/*/account*',
+            'https://api.khanbank.com:9003/*/account*',
         ];
 
         const tokenFilter = { urls: tokenUrls.map(u => `${u}*`) };

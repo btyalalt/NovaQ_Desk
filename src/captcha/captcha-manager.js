@@ -25,7 +25,7 @@ class CaptchaManager {
         // Хуучин цонх хаах
         await this.close();
 
-        const captchaUrl = isCitizen
+        const captchaUrl = isCitizen === 1
             ? 'https://e.khanbank.com/auth/login'
             : 'https://corp.khanbank.com/auth/login';
 

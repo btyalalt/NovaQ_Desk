@@ -130,178 +130,173 @@ const getJWTTokenFromServer = async (username, password) => {
 let getTokenAndStoreRunning = false;
 
 const getTokenAndStore = async (userOid) => {
-  // Prevent duplicate concurrent calls
-  if (getTokenAndStoreRunning) {
-    console.log('⚠️ getTokenAndStore аль хэдийн ажиллаж байна, алгасах...');
-    return {
-      success: false,
-      token: null,
-      user: null,
-      errorMessage: 'Token авах процесс аль хэдийн ажиллаж байна',
-      isDuplicate: true
-    };
-  }
-  
-  getTokenAndStoreRunning = true;
-  try {
-    console.log('🔍 getTokenAndStore дуудагдаж байна:', { userOid });
-
-    // Get user information from server
-    const apiBaseUrl = getApiUrl();
-
-    // JWT token авах (helper function ашиглах)
-    const jwtToken = await getJWTToken();
-    // Token-ийг зөвхөн development mode-д хэвлэх (production-д console.log арилна)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔑 jwtToken:', jwtToken ? `${jwtToken.substring(0, 50)}...` : 'null');
-    }
-    if (!jwtToken) {
-      return {
-        success: false,
-        token: null,
-        user: null,
-        errorMessage: 'JWT token олдсонгүй, эхлээд login хийх хэрэгтэй',
-        needLogin: true
-      };
-    }
-
-    // 1. User info шалгах
-    const fetchFn = getFetch();
-    const userRes = await fetchFn(`${apiBaseUrl}/api/auth/verify`, {
-      headers: {
-        'Authorization': `Bearer ${jwtToken}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    console.log('userRes', userRes);
-
-
-    if (!userRes.ok) {
-      if (userRes.status === 401) {
+    if (getTokenAndStoreRunning) {
         return {
-          success: false,
-          token: null,
-          user: null,
-          errorMessage: 'JWT token дууссан, дахин login хийх хэрэгтэй',
-          needLogin: true
+            success: false,
+            errorMessage: 'Token авах процесс аль хэдийн ажиллаж байна',
+            isDuplicate: true
         };
-      }
-      throw new Error(`User credentials API error: ${userRes.status}`);
     }
 
-    const userData = await userRes.json();
+    getTokenAndStoreRunning = true;
+    try {
+        const apiBaseUrl = getApiUrl();
+        const jwtToken = getJWTToken();
 
-    if (!userData.success || !userData.customerBankAccount) {
-      return {
-        success: false,
-        token: null,
-        user: null,
-        errorMessage: 'Хэрэглэгчийн банкны мэдээл олдсонгүй',
-        needCaptcha: true
-      };
-    }
+        if (!jwtToken) {
+            return {
+                success: false,
+                errorMessage: 'JWT token олдсонгүй, эхлээд login хийх хэрэгтэй',
+                needLogin: true
+            };
+        }
 
-    if (!userData.customerBankAccount.bankUserName || !userData.customerBankAccount.bankPassword) {
-      return {
-        success: false,
-        token: null,
-        user: null,
-        errorMessage: 'Хэрэглэгчийн мэдээл дутуу байна',
-        needCaptcha: true
-      };
-    }
-    const fetchFn2 = getFetch();
-    const tokenRes = await fetchFn2(`${apiBaseUrl}/api/desktop/token`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${jwtToken}` // JWT token
-      },
-    });
-    console.log('tokenRes', tokenRes);
-    if (!tokenRes.ok) {
-      const errorData = await tokenRes.json().catch(() => ({}));
-      console.error('❌ Token API алдаа:', {
-        status: tokenRes.status,
-        statusText: tokenRes.statusText,
-        error: errorData
-      });
+        // 1. User info шалгах
+        const fetchFn = getFetch();
+        const userRes = await fetchFn(`${apiBaseUrl}/api/auth/verify`, {
+            headers: {
+                'Authorization': `Bearer ${jwtToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
 
-      if (tokenRes.status === 401) {
+        if (!userRes.ok) {
+            if (userRes.status === 401) {
+                return {
+                    success: false,
+                    errorMessage: 'JWT token дууссан, дахин login хийх хэрэгтэй',
+                    needLogin: true
+                };
+            }
+            throw new Error(`User credentials API error: ${userRes.status}`);
+        }
+
+        const userData = await userRes.json();
+        if (!userData.success || !userData.customerBankAccount) {
+            return {
+                success: false,
+                errorMessage: 'Хэрэглэгчийн банкны мэдээл олдсонгүй',
+                needCaptcha: true
+            };
+        }
+
+        if (!userData.customerBankAccount.bankUserName || !userData.customerBankAccount.bankPassword) {
+            return {
+                success: false,
+                errorMessage: 'Хэрэглэгчийн мэдээл дутуу байна',
+                needCaptcha: true
+            };
+        }
+
+        // 2. Token авах — GET /api/desktop/token
+        const fetchFn2 = getFetch();
+        const tokenRes = await fetchFn2(`${apiBaseUrl}/api/desktop/token`, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${jwtToken}` // JWT token
+            },
+        });
+
+        const tokenData = await tokenRes.json().catch(() => ({}));
+
+        console.log('tokenData', tokenData)
+        // ─── Амжилттай ───
+        if (tokenRes.ok && tokenData.success && tokenData.data?.access_token) {
+            return { success: true, errorMessage: null };
+        }
+
+        // ─── Амжилтгүй — data.code шалгах (шинэ формат) ───
+        if (tokenData.data?.code) {
+            const { code, message, bankResponse } = tokenData.data;
+
+            switch (code) {
+                case 'CAPTCHA_PENDING':
+                    return {
+                        success: false,
+                        errorMessage: message || 'CAPTCHA шаардлагатай',
+                        bankResponse,
+                        needCaptcha: true,
+                    };
+
+                case 'REGISTER_DEVICE':
+                    return {
+                        success: false,
+                        errorMessage: message || 'Шинээр төхөөрөмж таниулах шаардлагатай',
+                        bankResponse,
+                        needCaptcha: true,
+                    };
+
+                case 'PASSWORD_BLOCKED':
+                    return {
+                        success: false,
+                        errorMessage: message || 'Нууц үг блоклогдсон',
+                        bankResponse,
+                        passwordBlocked: true,
+                    };
+
+                case 'CONTRACT_EXPIRED':
+                    return {
+                        success: false,
+                        errorMessage: message || 'Гэрээний хугацаа дууссан',
+                        bankResponse,
+                        contractExpired: true,
+                    };
+
+                case 'TOKEN_EXPIRED':
+                    return {
+                        success: false,
+                        errorMessage: message || 'Token дууссан',
+                        bankResponse,
+                    };
+
+                case 'CONNECTION_ERROR':
+                    return {
+                        success: false,
+                        errorMessage: message || 'Сүлжээний холболтын алдаа',
+                        bankResponse,
+                    };
+
+                case 'BANK_ERROR':
+                default:
+                    return {
+                        success: false,
+                        errorMessage: message || 'Банкны серверийн алдаа',
+                        bankResponse,
+                    };
+            }
+        }
+
+        // ─── HTTP status-аар fallback ───
+        if (tokenRes.status === 401) {
+            return {
+                success: false,
+                errorMessage: 'Нууц үг буруу байна',
+                needCaptcha: true,
+                passwordBlocked: true
+            };
+        }
+
+        if (tokenRes.status === 403) {
+            return {
+                success: false,
+                errorMessage: 'Хандах эрх байхгүй',
+            };
+        }
+
         return {
-          success: false,
-          token: null,
-          user: null,
-          errorMessage: 'Нууц үг буруу байна',
-          needCaptcha: true,
-          passwordBlocked: true
+            success: false,
+            errorMessage: tokenData.message || `Token API алдаа: ${tokenRes.status}`,
         };
-      }
 
-      if (tokenRes.status === 403) {
+    } catch (error) {
+        console.error('❌ getTokenAndStore алдаа:', error);
         return {
-          success: false,
-          token: null,
-          user: null,
-          errorMessage: 'Хандах эрх байхгүй',
-          showAlert: true,
-          alertTitle: 'Хандах эрх байхгүй',
-          alertMessage: 'Таны эрх хүчингүй болсон байна.'
+            success: false,
+            errorMessage: error.message || 'Токен авахад алдаа гарлаа'
         };
-      }
-
-      throw new Error(`Token API error: ${tokenRes.status} - ${tokenRes.statusText}`);
+    } finally {
+        getTokenAndStoreRunning = false;
     }
-
-    const tokenData = await tokenRes.json();
-    console.log('tokenData', tokenData);
-    if (tokenData.errorCode === 'PASSWORD_BLOCKED') {
-      return {
-        success: false,
-        token: null,
-        user: null,
-        errorMessage: 'Хаан банкны нууц үг блоклогдсон тул Интернэт банкаар нэвтэрч блокоо гаргаад дахин оролдоно уу.',
-        needCaptcha: false
-      };
-    }
-    if (tokenData.needCaptcha) {
-      return {
-        success: false,
-        token: null,
-        user: null,
-        errorMessage: 'Төхөөрөмж таниулах шаардлагатай',
-        needCaptcha: true
-      };
-    }
-    if (!tokenData.data?.access_token) {
-      return {
-        success: false,
-        token: null,
-        user: null,
-        errorMessage: 'Proxy хамгаалалт хийгдсэн тул интернет банкаараа орж шалгана уу',
-      };
-    }
-    console.log('✅ Token амжилттай авлаа:', {
-      hasToken: !!tokenData.token,
-      hasUser: !!tokenData.user,
-      tokenLength: tokenData.token?.length || 0
-    });
-
-    return {
-      success: true,
-      errorMessage: null
-    };
-
-  } catch (error) {
-    console.error('❌ getTokenAndStore алдаа:', error);
-    return {
-      success: false,
-      token: null,
-      user: null,
-      errorMessage: error.message || 'Токен авахад алдаа гарлаа'
-    };
-  } finally {
-    getTokenAndStoreRunning = false;
-  }
 };
 
 
@@ -331,23 +326,23 @@ const getTransactions = async () => {
       // Body-гүй - server дээр JWT token-оос userOid авах
     });
 
-    if (!res.ok) {
-      if (res.status === 401) {
-        return {
-          data: [],
-          errorMessage: 'JWT token дууссан, дахин login хийх хэрэгтэй',
-          needLogin: true
-        };
-      }
-      if (res.status === 403) {
-        return {
-          data: [],
-          errorMessage: 'Хандах эрх байхгүй',
-          needLogin: true
-        };
-      }
-      throw new Error(`Transactions API error: ${res.status}`);
-    }
+    // if (!res.ok) {
+    //   if (res.status === 401) {
+    //     return {
+    //       data: [],
+    //       errorMessage: 'JWT token дууссан, дахин login хийх хэрэгтэй',
+    //       needLogin: true
+    //     };
+    //   }
+    //   if (res.status === 403) {
+    //     return {
+    //       data: [],
+    //       errorMessage: 'Хандах эрх байхгүй',
+    //       needLogin: true
+    //     };
+    //   }
+    //   throw new Error(`Transactions API error: ${res.status}`);
+    // }
 
     const data = await res.json();
 

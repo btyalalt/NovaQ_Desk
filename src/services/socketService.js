@@ -23,6 +23,7 @@ class SocketService {
         this._onCaptchaRequired = null;
         this._onTokenExpired = null;
         this._onConnectChange = null;
+        this._pendingCaptchaSetup = null;
     }
 
     // ─── Connection ────────────────────────────────────────────
@@ -142,14 +143,18 @@ class SocketService {
     /**
      * CAPTCHA setup илгээх (CAPTCHA цонх нээхэд)
      */
-    emitCaptchaSetup(userOid, isCitizen) {
-        if (!this._isReady()) {
-            console.warn('[SocketService] Socket бэлэн биш, captcha-setup илгээгдсэнгүй');
-            return;
-        }
+    // socketService.js дотор:
 
-        this.socket.emit('captcha-setup', { userOid, isCitizen });
-        console.log('[SocketService] captcha-setup илгээгдлээ:', { userOid, isCitizen });
+    emitCaptchaSetup(userOid, isCitizen) {
+        if (this._isReady()) {
+            this.socket.emit('captcha-setup', { userOid, isCitizen });
+            console.log('[SocketService] captcha-setup илгээгдлээ');
+            this._pendingCaptchaSetup = false;
+        } else {
+            // Socket бэлэн биш — connect болоход илгээх
+            console.log('[SocketService] captcha-setup queue-д хадгалсан');
+            this._pendingCaptchaSetup = true;
+        }
     }
 
     /**
@@ -180,21 +185,19 @@ class SocketService {
         // ─── Connect ───
         this.socket.on('connect', () => {
             this.isConnected = true;
-            console.log('[SocketService] Connected:', this.socket.id);
+            if (this._userId) this.joinUserRoom(this._userId);
 
-            // Room join
-            if (this._userId) {
-                this.joinUserRoom(this._userId);
+            // Хүлээгдэж буй captcha-setup байвал илгээх
+            if (this._pendingCaptchaSetup && this._userId) {
+                this.socket.emit('captcha-setup', {
+                    userOid: this._userId,
+                    isCitizen: this._isCitizen
+                });
+                this._pendingCaptchaSetup = false;
+                console.log('[SocketService] captcha-setup (pending) илгээгдлээ');
             }
 
-            // CAPTCHA setup
-            if (this._userId && this._isCitizen !== null) {
-                this.emitCaptchaSetup(this._userId, this._isCitizen);
-            }
-
-            if (this._onConnectChange) {
-                this._onConnectChange(true);
-            }
+            if (this._onConnectChange) this._onConnectChange(true);
         });
 
         // ─── Disconnect ───
