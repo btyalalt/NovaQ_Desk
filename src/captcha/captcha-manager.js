@@ -43,8 +43,16 @@ class CaptchaManager {
             resizable: true,
             ...winCompat.getCompatibleWindowOptions(),
             webPreferences: winCompat.getCompatibleWebPreferences(),
+            webSecurity: false,
         });
 
+        this.window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+            const headers = { ...details.responseHeaders };
+            // CSP header-г устгах эсвэл blob: зөвшөөрөх
+            delete headers['content-security-policy'];
+            delete headers['Content-Security-Policy'];
+            callback({ responseHeaders: headers });
+        });
         this.window.webContents.setUserAgent(winCompat.getCompatibleUserAgent());
         winCompat.applySessionFixes();
 

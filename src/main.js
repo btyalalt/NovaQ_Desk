@@ -1458,7 +1458,10 @@ app.whenReady().then(() => {
   // Configure CSP for development mode (allow unsafe-eval for HMR)
   if (isDevelopment) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      const responseHeaders = { ...details.responseHeaders };
+      const responseHeaders = {
+          ...details.responseHeaders,
+          'Content-Security-Policy': ['']
+      };
       
       // Remove any existing CSP headers (case-insensitive)
       Object.keys(responseHeaders).forEach(key => {
