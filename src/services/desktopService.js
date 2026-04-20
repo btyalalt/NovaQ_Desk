@@ -3,6 +3,34 @@ const { getJWTToken } = require('./apiService');
 const https = require('https');
 const http = require('http');
 
+const getApiUrl = () => {
+    // Check if we're in Electron environment
+    if (typeof window !== 'undefined' && window.electron) {
+        // Check environment to determine API URL
+        const isDevelopment = process.env.NODE_ENV === 'development' ||
+            (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
+
+        if (isDevelopment) {
+            return 'http://localhost:3101';
+        } else {
+            return 'http://103.168.56.34:3101';
+        }
+    }
+
+    // In browser environment (non-Electron), check if we're on localhost
+    if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
+        const isRealDevelopment = process.env.NODE_ENV === 'development' &&
+            !process.execPath.includes('electron');
+
+        if (isRealDevelopment &&
+            (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+            return 'http://localhost:3101';
+        }
+    }
+
+    // Use production URL or configured URL
+    return API_CONFIG.BASE_URL;
+};
 // Main process-д JWT token авах функц
 function getJWTTokenForMainProcess() {
   // Main process-д global.currentAuthToken ашиглах
@@ -72,6 +100,8 @@ function httpsRequest(url, options, data = null) {
 
 
 class DesktopService {
+
+
   constructor() {
     this.baseUrl = API_CONFIG.BASE_URL;
   }
@@ -81,7 +111,8 @@ class DesktopService {
     try {
       const jwtToken = getJWTTokenForMainProcess();
 
-      
+      const apiBaseUrl = getApiUrl();
+      console.log(`clearKhanBankCookiesFromServer() ${this.baseUrl} new apiBaseUrl : ${apiBaseUrl}`)
       if (!jwtToken) {
         throw new Error('JWT token байхгүй байна');
       }
@@ -91,7 +122,9 @@ class DesktopService {
         console.log('ℹ️ Fetch not available, skipping API call');
         return { success: false, message: 'Fetch not available' };
       }
-      const response = await fetch(`${this.baseUrl}/api/desktop/clear-khanbank-cookies`, {
+
+
+      const response = await fetch(`${apiBaseUrl}/api/desktop/clear-khanbank-cookies`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
