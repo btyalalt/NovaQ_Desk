@@ -71,6 +71,7 @@ const clearJWTToken = () => {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.removeItem('jwt_token');
       window.localStorage.removeItem('auth_token');
+      global.currentAuthToken = null;
       console.log('✅ JWT token localStorage-с хасагдлаа');
     }
 

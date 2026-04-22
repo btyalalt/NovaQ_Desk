@@ -34,9 +34,9 @@ const getApiUrl = () => {
 // Main process-д JWT token авах функц
 function getJWTTokenForMainProcess() {
   // Main process-д global.currentAuthToken ашиглах
-  if (typeof global !== 'undefined' && global.currentAuthToken) {
-    return global.currentAuthToken;
-  }
+  // if (typeof global !== 'undefined' && global.currentAuthToken) {
+  //   return global.currentAuthToken;
+  // }
   global.currentAuthToken = getJWTToken();
   // Renderer process-д localStorage ашиглах
   return getJWTToken();
