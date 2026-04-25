@@ -292,14 +292,14 @@ class SocketService {
         if (typeof window !== 'undefined' && window.electron) {
             const isDev = process.env.NODE_ENV === 'development' ||
                 (typeof process !== 'undefined' && process.argv?.includes('--dev'));
-            return isDev ? 'http://localhost:3101' : 'http://103.168.56.34:3101';
+            return isDev ? (process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL) : API_CONFIG.BASE_URL;
         }
 
         if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
             const isDev = process.env.NODE_ENV === 'development' &&
                 !process.execPath?.includes('electron');
             if (isDev && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-                return 'http://localhost:3101';
+                return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
             }
         }
 

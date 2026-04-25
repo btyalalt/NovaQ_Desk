@@ -61,6 +61,7 @@ if (process.platform === 'win32') {
   }
 }
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const os = require('os');
 const fs = require('fs');
 const https = require('https');
@@ -232,7 +233,12 @@ const getAppVersion = () => {
 // Environment-based API Base URL
 const isDevelopment = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
 // Backend API server runs on port 3101, webpack dev server runs on port 3201
-const API_BASE_URL = isDevelopment ? 'http://localhost:3101' : 'http://103.168.56.34:3101';
+const API_BASE_URL_DEV = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
+const API_BASE_URL = isDevelopment
+  ? API_BASE_URL_DEV
+  : (process.env.API_BASE_URL || 'http://localhost:3119');
+const API_WS_BASE_URL_DEV = API_BASE_URL_DEV.replace(/^http/, 'ws');
+const API_WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
 
 // Portable update system - self-updating executable
 const INSTALL_DIR = process.platform === 'win32'
@@ -1476,7 +1482,7 @@ app.whenReady().then(() => {
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
         "style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data: https:; " +
-        "connect-src 'self' http://localhost:3101 http://103.168.56.34:3101 https://desktop-f96376.gitlab.io/ ws://localhost:3101 ws://103.168.56.34:3101 wss://103.168.56.34:3101 https://api.ipify.org;"
+        `connect-src 'self' ${API_BASE_URL_DEV} ${API_BASE_URL} https://desktop-f96376.gitlab.io/ ${API_WS_BASE_URL_DEV} ${API_WS_BASE_URL} https://api.ipify.org;`
       ];
       
       callback({ responseHeaders });

@@ -28,9 +28,9 @@ class AuthService {
                            (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
       
       if (isDevelopment) {
-        return 'http://localhost:3101';
+        return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
       } else {
-        return 'http://103.168.56.34:3101';
+        return API_CONFIG.BASE_URL;
       }
     }
     
@@ -41,7 +41,7 @@ class AuthService {
       
       if (isRealDevelopment && 
           (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        return 'http://localhost:3101';
+        return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
       }
     }
     

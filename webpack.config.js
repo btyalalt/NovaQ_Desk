@@ -1,4 +1,5 @@
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
@@ -72,7 +73,9 @@ module.exports = {
       inject: false
     }),
     new webpack.DefinePlugin({
-      'process.env.APP_VERSION': JSON.stringify(process.env.APP_VERSION || require('./package.json').version)
+      'process.env.APP_VERSION': JSON.stringify(process.env.APP_VERSION || require('./package.json').version),
+      'process.env.API_BASE_URL_DEV': JSON.stringify(process.env.API_BASE_URL_DEV || 'http://localhost:3119'),
+      'process.env.API_BASE_URL': JSON.stringify(process.env.API_BASE_URL || 'http://localhost:3119')
     }),
     new webpack.ProvidePlugin({
       process: 'process/browser'
