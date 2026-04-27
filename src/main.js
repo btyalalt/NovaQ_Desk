@@ -236,7 +236,7 @@ const isDevelopment = process.env.NODE_ENV === 'development' || process.argv.inc
 const API_BASE_URL_DEV = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
 const API_BASE_URL = isDevelopment
   ? API_BASE_URL_DEV
-  : (process.env.API_BASE_URL || 'http://localhost:3119');
+  : (process.env.API_BASE_URL || 'https://novaq.mn:3119');
 const API_WS_BASE_URL_DEV = API_BASE_URL_DEV.replace(/^http/, 'ws');
 const API_WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
 

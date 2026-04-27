@@ -74,9 +74,11 @@ const updateCSP = () => {
   if (metaCSP) {
     const devApiBaseUrl = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
     const devApiWsBaseUrl = devApiBaseUrl.replace(/^http/, 'ws');
-    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:3119';
+    const apiBaseUrl = process.env.API_BASE_URL || 'https://novaq.mn:3119';
     const apiWsBaseUrl = apiBaseUrl.replace(/^http/, 'ws');
-    const baseCSP = `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ${devApiBaseUrl} ${apiBaseUrl} https://desktop-f96376.gitlab.io/ ${devApiWsBaseUrl} ${apiWsBaseUrl} https://api.ipify.org;`;
+    const baseCSP = isDevelopment
+      ? `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ${devApiBaseUrl} ${apiBaseUrl} https://desktop-f96376.gitlab.io/ ${devApiWsBaseUrl} ${apiWsBaseUrl} https://api.ipify.org;`
+      : `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ${apiBaseUrl} ${apiWsBaseUrl} https://desktop-f96376.gitlab.io/ https://api.ipify.org;`;
     
     if (isDevelopment) {
       // Development mode - allow unsafe-eval for webpack

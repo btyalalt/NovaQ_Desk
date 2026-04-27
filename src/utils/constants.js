@@ -15,7 +15,7 @@ const getPackageVersion = () => {
 
 const VERSION = process.env.APP_VERSION || getPackageVersion(); // Dynamic version from environment or package.json
 const DEV_API_BASE_URL = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
-const PROD_API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3119';
+const PROD_API_BASE_URL = process.env.API_BASE_URL || 'https://novaq.mn:3119';
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const BUFFER_TIME = 30 * 1000; // 30 seconds
 
