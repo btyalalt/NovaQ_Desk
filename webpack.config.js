@@ -4,9 +4,21 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
+const isDevelopment = process.env.NODE_ENV !== 'production';
+const apiBaseUrlDev = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
+const apiBaseUrl = process.env.API_BASE_URL || 'https://novaq.mn:3119';
+const apiWsBaseUrlDev = apiBaseUrlDev.replace(/^http/, 'ws');
+const apiWsBaseUrl = apiBaseUrl.replace(/^http/, 'ws');
+const cspContent = [
+  "default-src 'self';",
+  `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ''};`,
+  "style-src 'self' 'unsafe-inline';",
+  "img-src 'self' data: https:;",
+  `connect-src 'self'${isDevelopment ? ' http://localhost:3201 ws://localhost:3201' : ''} ${apiBaseUrlDev} ${apiBaseUrl} ${apiWsBaseUrlDev} ${apiWsBaseUrl} https://desktop-f96376.gitlab.io/ https://api.ipify.org;`
+].join(' ');
 
 module.exports = {
-  mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
+  mode: isDevelopment ? 'development' : 'production',
   entry: './src/webpack-entry.js',
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -70,7 +82,10 @@ module.exports = {
     new HtmlWebpackPlugin({
       template: './src/index.html',
       filename: 'index.html',
-      inject: false
+      inject: false,
+      templateParameters: {
+        cspContent,
+      },
     }),
     new webpack.DefinePlugin({
       'process.env.APP_VERSION': JSON.stringify(process.env.APP_VERSION || require('./package.json').version),

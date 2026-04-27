@@ -4,7 +4,6 @@ import './utils/electronMock';
 import LoginScreen from './components/LoginScreen';
 import VersionCheck from './components/VersionCheck';
 import FullScreenUpdate from './components/FullScreenUpdate';
-import { isDevelopment } from './utils/constants';
 
 // Global error handler - log but don't exit during update
 window.addEventListener('error', (event) => {
@@ -23,6 +22,19 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // Global root instance to prevent duplicate creation
 let appRoot = null;
+
+const isRendererDevelopment = (() => {
+  try {
+    const argv = Array.isArray(process.argv) ? process.argv : [];
+    const hasDevArg = argv.includes('--dev');
+    const hasDevNodeEnv = process.env.NODE_ENV === 'development';
+    const isLocalhost = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+    return hasDevNodeEnv || hasDevArg || isLocalhost;
+  } catch (error) {
+    console.warn('⚠️ Failed to detect renderer environment, defaulting to production CSP');
+    return false;
+  }
+})();
 
 // App wrapper component with update screen
 const AppWithUpdateScreen = () => {
@@ -76,11 +88,11 @@ const updateCSP = () => {
     const devApiWsBaseUrl = devApiBaseUrl.replace(/^http/, 'ws');
     const apiBaseUrl = process.env.API_BASE_URL || 'https://novaq.mn:3119';
     const apiWsBaseUrl = apiBaseUrl.replace(/^http/, 'ws');
-    const baseCSP = isDevelopment
+    const baseCSP = isRendererDevelopment
       ? `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ${devApiBaseUrl} ${apiBaseUrl} https://desktop-f96376.gitlab.io/ ${devApiWsBaseUrl} ${apiWsBaseUrl} https://api.ipify.org;`
       : `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ${apiBaseUrl} ${apiWsBaseUrl} https://desktop-f96376.gitlab.io/ https://api.ipify.org;`;
     
-    if (isDevelopment) {
+    if (isRendererDevelopment) {
       // Development mode - allow unsafe-eval for webpack
       metaCSP.setAttribute('content', baseCSP + " script-src 'self' 'unsafe-inline' 'unsafe-eval';");
       console.log('🔒 CSP updated for development (unsafe-eval enabled)');
