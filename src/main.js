@@ -1190,9 +1190,7 @@ del "%~f0"`;
 
 // ✅ App эхлэх үед auth token-г global-д тохируулах
 global.currentAuthToken =
-  store.get('authToken') ||
   store.get('jwt_token') ||
-  store.get('auth_token') ||
   null;
 console.log('🔑 [MAIN] App эхлэх үед auth token тохируулагдлаа:', global.currentAuthToken ? '✅' : '❌');
 
@@ -1858,7 +1856,7 @@ ipcMain.handle('store-set', async (event, key, value) => {
   store.set(key, value);
   
   // ✅ Auth token-г global-д тохируулах
-  if (key === 'authToken' || key === 'jwt_token' || key === 'auth_token') {
+  if (key === 'jwt_token') {
     global.currentAuthToken = value;
     console.log('🔑 [MAIN] Global auth token тохируулагдлаа:', value ? '✅' : '❌');
   }
@@ -1868,7 +1866,7 @@ ipcMain.handle('store-set', async (event, key, value) => {
 
 ipcMain.handle('store-delete', async (event, key) => {
   store.delete(key);
-  if (key === 'authToken' || key === 'jwt_token' || key === 'auth_token') {
+  if (key === 'jwt_token') {
     global.currentAuthToken = null;
   }
   return { success: true };
@@ -2349,7 +2347,7 @@ ipcMain.handle('get-local-storage', async (event, { key }) => {
 // JWT token авах функц
 ipcMain.handle('get-jwt-token', async () => {
   try {
-    const token = store.get('jwt_token') || store.get('auth_token') || global.currentAuthToken;
+    const token = store.get('jwt_token') || global.currentAuthToken;
     return { success: true, token };
   } catch (error) {
     return { success: false, error: error.message };
@@ -2360,7 +2358,6 @@ ipcMain.handle('get-jwt-token', async () => {
 ipcMain.handle('set-jwt-token', async (event, { token }) => {
   try {
     store.set('jwt_token', token);
-    store.set('auth_token', token);
     global.currentAuthToken = token;
     console.log('🔑 [MAIN] JWT token хадгалагдлаа:', token ? '✅' : '❌');
     return { success: true };
@@ -2373,7 +2370,6 @@ ipcMain.handle('set-jwt-token', async (event, { token }) => {
 ipcMain.handle('clear-jwt-token', async () => {
   try {
     store.delete('jwt_token');
-    store.delete('auth_token');
     global.currentAuthToken = null;
     console.log('🔑 [MAIN] JWT token хасагдлаа');
     return { success: true };

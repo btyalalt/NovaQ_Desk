@@ -293,7 +293,7 @@ class AuthService {
 
         // Store token and user data in electron-store
         if (window.electron) {
-          await window.electron.invoke('store-set', 'authToken', result.token);
+          await window.electron.invoke('store-set', 'jwt_token', result.token);
           await window.electron.invoke('store-set', 'currentUser', result.user);
 
           // Store CustomerBankAccount data if available
@@ -360,7 +360,7 @@ class AuthService {
 
   async getToken() {
     if (window.electron) {
-      return await window.electron.invoke('store-get', 'authToken');
+      return await window.electron.invoke('store-get', 'jwt_token');
     }
     return null;
   }
@@ -545,7 +545,7 @@ class AuthService {
       if (response.ok) {
         const result = await response.json();
         if (window.electron) {
-          await window.electron.invoke('store-set', 'authToken', result.token);
+          await window.electron.invoke('store-set', 'jwt_token', result.token);
         }
         return true;
       }

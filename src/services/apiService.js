@@ -47,7 +47,6 @@ const saveJWTToken = (token) => {
     console.log('🔍 saveJWTToken token:', token);
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem('jwt_token', token);
-      window.localStorage.setItem('auth_token', token); // Backup
       console.log('✅ JWT token localStorage-д хадгалагдлаа');
     } else {
       console.log('⚠️ localStorage боломжгүй, token хадгалахгүй');
@@ -60,7 +59,7 @@ const saveJWTToken = (token) => {
 // JWT token авах функц
 const getJWTToken = () => {
   if (typeof window !== 'undefined' && window.localStorage) {
-    return window.localStorage.getItem('jwt_token') || window.localStorage.getItem('auth_token');
+    return window.localStorage.getItem('jwt_token');
   }
   return null;
 };
@@ -70,7 +69,6 @@ const clearJWTToken = () => {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.removeItem('jwt_token');
-      window.localStorage.removeItem('auth_token');
       global.currentAuthToken = null;
       console.log('✅ JWT token localStorage-с хасагдлаа');
     }
