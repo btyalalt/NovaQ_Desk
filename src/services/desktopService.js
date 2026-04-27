@@ -33,13 +33,18 @@ const getApiUrl = () => {
 };
 // Main process-д JWT token авах функц
 function getJWTTokenForMainProcess() {
-  // Main process-д global.currentAuthToken ашиглах
-  // if (typeof global !== 'undefined' && global.currentAuthToken) {
-  //   return global.currentAuthToken;
-  // }
-  global.currentAuthToken = getJWTToken();
-  // Renderer process-д localStorage ашиглах
-  return getJWTToken();
+  // Main process: use token already shared from electron-store/login flow.
+  if (typeof global !== 'undefined' && global.currentAuthToken) {
+    return global.currentAuthToken;
+  }
+
+  // Renderer fallback: read from localStorage if available.
+  const rendererToken = getJWTToken();
+  if (rendererToken && typeof global !== 'undefined') {
+    global.currentAuthToken = rendererToken;
+  }
+
+  return rendererToken || null;
 }
 
 // HTTPS module ашиглаж API дуудах функц
@@ -172,6 +177,13 @@ class DesktopService {
         return false;
       }
 
+      const jwtToken = getJWTTokenForMainProcess();
+      if (!jwtToken) {
+        // Skip cookie sync until auth token is available to avoid noisy 401 loops.
+        console.warn('⚠️ JWT token байхгүй тул cookies sync түр алгасав');
+        return false;
+      }
+
       // Try fetch first, fallback to https module
       let response;
       const requestData = {
@@ -194,7 +206,7 @@ class DesktopService {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${getJWTTokenForMainProcess()}`
+            'Authorization': `Bearer ${jwtToken}`
           },
           body: JSON.stringify(requestData)
         });
@@ -204,7 +216,7 @@ class DesktopService {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${getJWTTokenForMainProcess()}`
+            'Authorization': `Bearer ${jwtToken}`
           }
         }, requestData);
       }
@@ -233,7 +245,8 @@ class DesktopService {
       console.log('🔍 checkExposeHeaders JWT token:', jwtToken);
       
       if (!jwtToken) {
-        throw new Error('JWT token байхгүй байна');
+        console.warn('⚠️ JWT token байхгүй тул expose-headers шалгалт алгасав');
+        return { success: false, skipped: true, reason: 'missing_jwt' };
       }
       
       // Try fetch first, fallback to https module
@@ -269,8 +282,8 @@ class DesktopService {
       console.log('✅ Expose-Headers шалгагдлаа:', data);
       return data;
     } catch (error) {
-      console.error('❌ Expose-Headers шалгахад алдаа:', error);
-      throw error;
+      console.error('❌ Expose-Headers шалгахад алдаа:', error.message || error);
+      return { success: false, skipped: true, reason: 'request_failed' };
     }
   }
 

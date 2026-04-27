@@ -1189,7 +1189,11 @@ del "%~f0"`;
 }
 
 // ✅ App эхлэх үед auth token-г global-д тохируулах
-global.currentAuthToken = store.get('authToken') || null;
+global.currentAuthToken =
+  store.get('authToken') ||
+  store.get('jwt_token') ||
+  store.get('auth_token') ||
+  null;
 console.log('🔑 [MAIN] App эхлэх үед auth token тохируулагдлаа:', global.currentAuthToken ? '✅' : '❌');
 
 
@@ -1854,7 +1858,7 @@ ipcMain.handle('store-set', async (event, key, value) => {
   store.set(key, value);
   
   // ✅ Auth token-г global-д тохируулах
-  if (key === 'authToken') {
+  if (key === 'authToken' || key === 'jwt_token' || key === 'auth_token') {
     global.currentAuthToken = value;
     console.log('🔑 [MAIN] Global auth token тохируулагдлаа:', value ? '✅' : '❌');
   }
@@ -1864,6 +1868,9 @@ ipcMain.handle('store-set', async (event, key, value) => {
 
 ipcMain.handle('store-delete', async (event, key) => {
   store.delete(key);
+  if (key === 'authToken' || key === 'jwt_token' || key === 'auth_token') {
+    global.currentAuthToken = null;
+  }
   return { success: true };
 });
 
