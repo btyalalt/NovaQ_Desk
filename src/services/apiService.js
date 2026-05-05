@@ -316,7 +316,7 @@ const getTransactions = async () => {
 
     const apiBaseUrl = getApiUrl();
     const fetchFn = getFetch();
-    const res = await fetchFn(`${apiBaseUrl}/api/desktop/transactions`, {
+    const res = await fetchFn(`${apiBaseUrl}/api/desktop/transactions/all`, {
       method: 'GET', // GET method ашиглах (JWT token header-ээс авах)
       headers: {
         'Authorization': `Bearer ${jwtToken}`,
@@ -344,6 +344,7 @@ const getTransactions = async () => {
     // }
 
     const data = await res.json();
+    const payloadData = data?.data || null;
 
     // CAPTCHA шаардлагатай эсэхийг шалгах
     if (data.needCaptcha) {
@@ -354,12 +355,30 @@ const getTransactions = async () => {
       };
     }
 
+    let normalizedTransactions = payloadData?.transactions || [];
+    const isGroupedTransactions =
+      Array.isArray(payloadData?.transactions) &&
+      payloadData.transactions.length > 0 &&
+      payloadData.transactions.some((item) => item && typeof item === 'object' && Array.isArray(item.transactions));
+
+    if (isGroupedTransactions) {
+      normalizedTransactions = payloadData.transactions.flatMap((bank) =>
+        Array.isArray(bank?.transactions) ? bank.transactions : []
+      );
+    }
+
+    const normalizedData = {
+      ...(payloadData || {}),
+      banks: isGroupedTransactions ? payloadData.transactions : (payloadData?.banks || []),
+      transactions: normalizedTransactions
+    };
+
     console.log('✅ Transactions амжилттай авлаа:', {
       success: data.success,
-      count: data.data?.transactions?.length || 0
+      count: normalizedData.transactions?.length || 0
     });
 
-    return { data: data.data, errorMessage: null };
+    return { data: normalizedData, errorMessage: null };
 
   } catch (error) {
     console.error('❌ getTransactions алдаа:', error);

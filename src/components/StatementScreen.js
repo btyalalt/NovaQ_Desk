@@ -6,6 +6,14 @@ import authService from '../services/authService';
 import socketService from '../services/socketService';
 
 const desktopService = new DesktopService();
+const KHAN_BANK_ID = 'A09422E3-3B85-4883-9F78-2030851A6B9C';
+const TDB_BANK_ID = '4CC51C7F-FE7E-4497-A44E-BF34450F8708';
+const MANDATORY_DARK_BANK_ID = 'E0E0317E-3D5D-4F1A-B950-B84DDD7E9F78';
+const BANK_AMOUNT_COLORS = {
+    [KHAN_BANK_ID]: '#00A651',
+    [TDB_BANK_ID]: '#1296DB',
+    [MANDATORY_DARK_BANK_ID]: '#343A46',
+};
 
 const StatementScreen = ({
                              onBack,
@@ -16,9 +24,10 @@ const StatementScreen = ({
                              customer,
                              theme = 'light'
                          }) => {
-    const [amount, setAmount] = useState('₮ 0');
     const [transactions, setTransactions] = useState([]);
     const [totalAmount, setTotalAmount] = useState(0);
+    const [accountTotals, setAccountTotals] = useState([]);
+    const [selectedAccountNumber, setSelectedAccountNumber] = useState(null);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
@@ -28,14 +37,47 @@ const StatementScreen = ({
     const [animatedTransactions, setAnimatedTransactions] = useState(new Set());
     const [tokenResult, setTokenResult] = useState(null);
     const [showAmount, setShowAmount] = useState(false);
+    const [showAccountList, setShowAccountList] = useState(false);
 
     const fetchingRef = useRef(false);
     const captchaOpenRef = useRef(false);
+    const accountDropdownRef = useRef(null);
 
     // ─── Helper ────────────────────────────────────────────────
 
     const calculateTotalAmount = (txList) => {
         return txList.reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0), 0);
+    };
+
+    const formatMoney = (value) => {
+        const numericValue = Number(value) || 0;
+        return numericValue.toLocaleString('mn-MN', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    };
+    const MASKED_AMOUNT = '************';
+
+    const normalizeAccountNumber = (value) => String(value || '').trim();
+
+    const hydrateAccountTotals = (data) => {
+        const totals = Array.isArray(data?.accountTotals)
+            ? data.accountTotals.filter((item) => item && item.accountNumber)
+            : [];
+
+        setAccountTotals(totals);
+
+        const preferredAccount =
+            normalizeAccountNumber(selectedAccountNumber) ||
+            normalizeAccountNumber(customerBankAccount?.bankAccountNum);
+
+        const matchedAccount = totals.find(
+            (item) => normalizeAccountNumber(item.accountNumber) === preferredAccount
+        );
+
+        setSelectedAccountNumber(
+            matchedAccount?.accountNumber || totals[0]?.accountNumber || null
+        );
     };
 
     // ─── Socket setup (нэг удаа) ──────────────────────────────
@@ -62,19 +104,27 @@ const StatementScreen = ({
             // User шалгалт
             if (data.data.userOid && data.data.userOid !== userId) return;
 
-            const incoming = data.data.transactions;
+            const fallbackBankId = String(customerBankAccount?.bankId || customerBankAccount?.BankId || '').toUpperCase();
+            const incoming = data.data.transactions.map((tx) => ({
+                ...tx,
+                bankId: String(tx?.bankId || fallbackBankId).toUpperCase(),
+            }));
             if (incoming.length === 0) return;
 
             setTransactions(prev => {
-                const existingIds = new Set(prev.map(t => `${t.amount}-${t.from}-${t.date}`));
-                const unique = incoming.filter(t => !existingIds.has(`${t.amount}-${t.from}-${t.date}`));
+                const existingIds = new Set(
+                    prev.map(t => `${String(t.bankId || '').toUpperCase()}-${t.amount}-${t.from}-${t.date}`)
+                );
+                const unique = incoming.filter(
+                    t => !existingIds.has(`${String(t.bankId || '').toUpperCase()}-${t.amount}-${t.from}-${t.date}`)
+                );
 
                 if (unique.length === 0) return prev;
 
                 console.log(`🆕 ${unique.length} шинэ гүйлгээ ирлээ`);
 
                 // Animation
-                const newIds = unique.map(t => `${t.amount}-${t.from}-${t.date}`);
+                const newIds = unique.map(t => `${String(t.bankId || '').toUpperCase()}-${t.amount}-${t.from}-${t.date}`);
                 setAnimatedTransactions(prev => new Set([...prev, ...newIds]));
                 setNewTransactionsCount(prev => prev + unique.length);
 
@@ -187,9 +237,7 @@ const StatementScreen = ({
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
                     }
-                    if (data.account) {
-                        setAmount(`₮ ${data.account.toLocaleString()}`);
-                    }
+                    hydrateAccountTotals(data);
                     break;
 
                 case 'CAPTCHA_PENDING':
@@ -200,6 +248,7 @@ const StatementScreen = ({
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
                     }
+                    hydrateAccountTotals(data);
                     break;
 
                 case 'REGISTER_DEVICE':
@@ -247,9 +296,7 @@ const StatementScreen = ({
                         setErrorMessageBank('');
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
-                        if (data.account) {
-                            setAmount(`₮ ${data.account.toLocaleString()}`);
-                        }
+                        hydrateAccountTotals(data);
                     }
                     break;
             }
@@ -396,6 +443,25 @@ const StatementScreen = ({
         tokenRefresh();
     }, []);
 
+    useEffect(() => {
+        setShowAccountList(false);
+    }, [customerBankAccount?.bankAccountNum]);
+
+    useEffect(() => {
+        if (!showAccountList) return undefined;
+
+        const handleOutsideClick = (event) => {
+            if (!accountDropdownRef.current) return;
+            if (!accountDropdownRef.current.contains(event.target)) {
+                setShowAccountList(false);
+                setShowAmount(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleOutsideClick);
+        return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }, [showAccountList]);
+
     // ─── Theme ─────────────────────────────────────────────────
 
     useEffect(() => {
@@ -404,6 +470,34 @@ const StatementScreen = ({
     }, [theme]);
 
     // ─── Render ────────────────────────────────────────────────
+
+    const hasMultipleAccounts = accountTotals.length >= 2;
+    const selectedAccount = accountTotals.find(
+        (item) => normalizeAccountNumber(item.accountNumber) === normalizeAccountNumber(selectedAccountNumber)
+    );
+    const displayedAccountNumber =
+        selectedAccount?.accountNumber || customerBankAccount?.bankAccountNum || 'Данс олдсонгүй';
+    const displayedAmount = selectedAccount?.amountSum ?? totalAmount;
+
+    const handleAmountClick = () => {
+        if (hasMultipleAccounts) {
+            setShowAccountList((prev) => {
+                const next = !prev;
+                setShowAmount(next);
+                return next;
+            });
+            return;
+        }
+
+        setShowAccountList(false);
+        setShowAmount((prev) => !prev);
+    };
+
+    const handleSelectAccount = (account) => {
+        setSelectedAccountNumber(account.accountNumber);
+        setShowAccountList(false);
+        setShowAmount(false);
+    };
 
     return (
         <>
@@ -442,19 +536,20 @@ const StatementScreen = ({
                 </div>
 
                 {/* Account box */}
-                <div className="account-box">
-                    <span className="account-number">{customerBankAccount?.bankAccountNum || 'Данс олдсонгүй'}</span>
-                    <span className="account-amount" style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                <div className="account-dropdown-wrapper" ref={accountDropdownRef}>
+                    <div className="account-box">
+                        <span className="account-number">{displayedAccountNumber}</span>
+                        <span className="account-amount" style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
             <span style={{ userSelect: 'none' }}>
               {showAmount
-                  ? `₮ ${(typeof totalAmount === 'number' ? totalAmount : 0).toLocaleString('mn-MN')}`
-                  : '₮ ••••••'
+                  ? `₮ ${formatMoney(displayedAmount)}`
+                  : MASKED_AMOUNT
               }
             </span>
             <button
                 type="button"
                 className="Income"
-                onClick={() => setShowAmount(s => !s)}
+                onClick={handleAmountClick}
                 style={{
                     background: 'none', border: 'none', padding: 0, margin: 0,
                     cursor: 'pointer', outline: 'none', boxShadow: 'none',
@@ -468,6 +563,26 @@ const StatementScreen = ({
               </svg>
             </button>
           </span>
+                    </div>
+                    {showAccountList && hasMultipleAccounts && (
+                        <div className="account-totals-list">
+                            {accountTotals.map((account) => {
+                                const accountNumber = normalizeAccountNumber(account.accountNumber);
+                                const isSelected = accountNumber === normalizeAccountNumber(selectedAccountNumber);
+                                return (
+                                    <button
+                                        key={accountNumber}
+                                        type="button"
+                                        className={`account-totals-item ${isSelected ? 'active' : ''}`}
+                                        onClick={() => handleSelectAccount(account)}
+                                    >
+                                        <span>{accountNumber}</span>
+                                        <span>{showAmount ? `₮ ${formatMoney(account.amountSum)}` : MASKED_AMOUNT}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
 
                 <button
@@ -501,12 +616,19 @@ const StatementScreen = ({
                             {transactions
                                 .sort((a, b) => new Date(b.date) - new Date(a.date))
                                 .map((item, idx) => {
-                                    const txId = `${item.amount}-${item.from}-${item.date}`;
+                                    const txId = `${String(item.bankId || '').toUpperCase()}-${item.amount}-${item.from}-${item.date}`;
                                     const isNew = animatedTransactions.has(txId);
+                                    const bankId = String(item.bankId || '').toUpperCase();
+                                    const amountColor = BANK_AMOUNT_COLORS[bankId];
                                     return (
                                         <li key={idx} className={`transaction-item ${isNew ? 'new-transaction' : ''}`}>
                                             <div className="transaction-content">
-                                                <div className="transaction-amount">{item.amount?.toLocaleString()}</div>
+                                                <div
+                                                    className="transaction-amount"
+                                                    style={amountColor ? {color: amountColor} : undefined}
+                                                >
+                                                    {item.amount?.toLocaleString()}
+                                                </div>
                                                 <div className="transaction-details">
                                                     <div className="transaction-from">{item.from}</div>
                                                     <div className="transaction-date">{item.date}</div>

@@ -197,6 +197,60 @@
   color: var(--mobile-text-primary);
 }
 
+.account-dropdown-wrapper {
+  position: relative;
+  margin: var(--mobile-account-margin);
+}
+
+.account-dropdown-wrapper .account-box {
+  margin: 0;
+}
+
+.account-totals-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  border: 1px solid var(--mobile-account-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--mobile-account-bg);
+  z-index: 20;
+  max-height: 180px;
+  overflow-y: auto;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+}
+
+.account-totals-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--mobile-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  border-bottom: 1px solid var(--mobile-transaction-border);
+}
+
+.account-totals-item:last-child {
+  border-bottom: none;
+}
+
+.account-totals-item.active {
+  background: rgba(0, 118, 255, 0.08);
+  color: var(--mobile-button-bg, #0076FF);
+}
+
+.account-totals-item:hover {
+  background: rgba(0, 118, 255, 0.05);
+}
+
 /* Refresh Button */
 .refresh-button {
   width: calc(100% - 25px);
