@@ -4,9 +4,14 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
+
+const PROD_API_URL = 'https://novaq.mn:3119';
 const isDevelopment = process.env.NODE_ENV !== 'production';
+// Install/portable .exe build: always bake prod API (ignore test URL from .env)
+const apiBaseUrl = isDevelopment
+  ? (process.env.API_BASE_URL || PROD_API_URL)
+  : PROD_API_URL;
 const apiBaseUrlDev = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
-const apiBaseUrl = process.env.API_BASE_URL || 'https://novaq.mn:3119';
 const apiWsBaseUrlDev = apiBaseUrlDev.replace(/^http/, 'ws');
 const apiWsBaseUrl = apiBaseUrl.replace(/^http/, 'ws');
 const cspContent = [
@@ -88,9 +93,10 @@ module.exports = {
       },
     }),
     new webpack.DefinePlugin({
+      'process.env.NODE_ENV': JSON.stringify(isDevelopment ? 'development' : 'production'),
       'process.env.APP_VERSION': JSON.stringify(process.env.APP_VERSION || require('./package.json').version),
-      'process.env.API_BASE_URL_DEV': JSON.stringify(process.env.API_BASE_URL_DEV || 'http://localhost:3119'),
-      'process.env.API_BASE_URL': JSON.stringify(process.env.API_BASE_URL || 'https://novaq.mn:3119')
+      'process.env.API_BASE_URL_DEV': JSON.stringify(apiBaseUrlDev),
+      'process.env.API_BASE_URL': JSON.stringify(apiBaseUrl)
     }),
     new webpack.ProvidePlugin({
       process: 'process/browser'

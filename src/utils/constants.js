@@ -14,8 +14,9 @@ const getPackageVersion = () => {
 };
 
 const VERSION = process.env.APP_VERSION || getPackageVersion(); // Dynamic version from environment or package.json
+const PROD_API_URL = 'https://novaq.mn:3119';
 const DEV_API_BASE_URL = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
-const PROD_API_BASE_URL = process.env.API_BASE_URL || 'https://novaq.mn:3119';
+const PROD_API_BASE_URL = process.env.API_BASE_URL || PROD_API_URL;
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const BUFFER_TIME = 30 * 1000; // 30 seconds
 
@@ -45,9 +46,10 @@ if (!globalObj[constantsLoggedKey]) {
   console.log('🔍 [CONSTANTS] isDevelopment:', isDevelopment);
 }
 
-// API Configuration
+// API Configuration — webpack prod / packaged app always uses prod URL
+const useProdApi = process.env.NODE_ENV === 'production' || isPortableMode || isElectronApp;
 let API_CONFIG = {
-  BASE_URL: isDevelopment ? DEV_API_BASE_URL : PROD_API_BASE_URL
+  BASE_URL: useProdApi ? PROD_API_BASE_URL : DEV_API_BASE_URL
 };
 
 if (!globalObj[constantsLoggedKey]) {

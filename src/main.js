@@ -62,6 +62,16 @@ if (process.platform === 'win32') {
 }
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+
+// Packaged install/portable .exe → always production API (novaq.mn:3119)
+const PROD_API_URL = 'https://novaq.mn:3119';
+if (app.isPackaged) {
+  process.env.NODE_ENV = 'production';
+  if (!process.env.API_BASE_URL || process.env.API_BASE_URL.includes('103.168.56.34')) {
+    process.env.API_BASE_URL = PROD_API_URL;
+  }
+}
+
 const os = require('os');
 const fs = require('fs');
 const https = require('https');
@@ -234,9 +244,9 @@ const getAppVersion = () => {
 const isDevelopment = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
 // Backend API server runs on port 3101, webpack dev server runs on port 3201
 const API_BASE_URL_DEV = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
-const API_BASE_URL = isDevelopment
-  ? API_BASE_URL_DEV
-  : (process.env.API_BASE_URL || 'https://novaq.mn:3119');
+const API_BASE_URL = (app.isPackaged || !isDevelopment)
+  ? (process.env.API_BASE_URL || PROD_API_URL)
+  : API_BASE_URL_DEV;
 const API_WS_BASE_URL_DEV = API_BASE_URL_DEV.replace(/^http/, 'ws');
 const API_WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
 

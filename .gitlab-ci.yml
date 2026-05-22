@@ -32,35 +32,39 @@ build-desktop-win:
     - npm ci --cache .npm --prefer-offline
   script: |
     set -euo pipefail
-    npm run build
+    npm run webpack:build:prod
 
-    echo "== Build Windows ZIP (portable) =="
-    npx electron-builder --win zip --publish=never
-    
-    echo "== Build Windows NSIS Installer (with improved settings) =="
+    echo "== Build Windows ZIP (32-bit portable, Windows 7+) =="
+    npx electron-builder --win zip --ia32 --publish=never
+
+    echo "== Build Windows NSIS Installer (32-bit) =="
     set +e  # Temporarily disable exit on error for NSIS build
-    
-    # Try NSIS build with more permissive settings
+
     ELECTRON_BUILDER_CACHE_DIR="$CI_PROJECT_DIR/.cache/electron-builder" \
-    npx electron-builder --win nsis --publish=never --config.nsis.oneClick=false --config.nsis.allowToChangeInstallationDirectory=true
+    npx electron-builder --win nsis --ia32 --publish=never \
+      --config.nsis.oneClick=false \
+      --config.nsis.allowToChangeInstallationDirectory=true \
+      --config.nsis.artifactName='NovaQ_Desk.${ext}'
     NSIS_EXIT_CODE=$?
     set -e  # Re-enable exit on error
-    
+
     if [ $NSIS_EXIT_CODE -eq 0 ]; then
-      echo "✅ NSIS installer built successfully"
+      echo "✅ 32-bit NSIS installer built successfully"
     else
-      echo "⚠️  NSIS installer build failed (exit code: $NSIS_EXIT_CODE)"
-      echo "🔄 Attempting simpler NSIS build..."
-      
+      echo "⚠️  32-bit NSIS installer build failed (exit code: $NSIS_EXIT_CODE)"
+      echo "🔄 Attempting simpler 32-bit NSIS build..."
+
       set +e
-      npx electron-builder --win nsis --publish=never --config.nsis.oneClick=true
+      npx electron-builder --win nsis --ia32 --publish=never \
+        --config.nsis.oneClick=true \
+        --config.nsis.artifactName='NovaQ_Desk.${ext}'
       NSIS_EXIT_CODE=$?
       set -e
-      
+
       if [ $NSIS_EXIT_CODE -eq 0 ]; then
-        echo "✅ Simple NSIS installer built successfully"
+        echo "✅ Simple 32-bit NSIS installer built successfully"
       else
-        echo "❌ All NSIS build attempts failed"
+        echo "❌ All 32-bit NSIS build attempts failed"
       fi
     fi
 
@@ -82,15 +86,39 @@ build-desktop-win:
     cp -f release/*.yml public/ 2>/dev/null || true
     echo "✅ Copied $PORTABLE_ZIP to public/NovaQ-Portable-$VERSION.zip"
     
-    # ⚡ Copy installer as NovaQ-Setup.exe for fixed download URL (with size validation)
-    if compgen -G "release/NovaQ-Setup-*.exe" > /dev/null; then
+    # ⚡ Copy 32-bit NSIS installer (fixed download URL)
+    if [ -f "release/NovaQ_Desk.exe" ]; then
+      FILE_SIZE=$(stat -c%s "release/NovaQ_Desk.exe" 2>/dev/null || echo "0")
+      echo "🔍 Found 32-bit NSIS installer: release/NovaQ_Desk.exe (Size: $FILE_SIZE bytes)"
+
+      if [ "$FILE_SIZE" -gt 1000000 ]; then
+        cp "release/NovaQ_Desk.exe" "public/NovaQ_Desk.exe"
+        cp "release/NovaQ_Desk.exe" "public/NovaQ-Setup.exe"
+        echo "✅ Copied NovaQ_Desk.exe to public/ (Size: $FILE_SIZE bytes)"
+      else
+        echo "⚠️  NovaQ_Desk.exe too small ($FILE_SIZE bytes), skipping"
+      fi
+    elif compgen -G "release/NovaQ_Desk-*.exe" > /dev/null; then
+      SETUP_EXE=$(ls release/NovaQ_Desk-ia32.exe release/NovaQ_Desk-*.exe 2>/dev/null | head -n1)
+      FILE_SIZE=$(stat -c%s "$SETUP_EXE" 2>/dev/null || echo "0")
+      echo "🔍 Found NSIS installer: $SETUP_EXE (Size: $FILE_SIZE bytes)"
+
+      if [ "$FILE_SIZE" -gt 1000000 ]; then
+        cp "$SETUP_EXE" "public/NovaQ_Desk.exe"
+        cp "$SETUP_EXE" "public/NovaQ-Setup.exe"
+        echo "✅ Copied $SETUP_EXE to public/NovaQ_Desk.exe (Size: $FILE_SIZE bytes)"
+      else
+        echo "⚠️  NSIS installer too small ($FILE_SIZE bytes), skipping"
+      fi
+    elif compgen -G "release/NovaQ-Setup-*.exe" > /dev/null; then
       SETUP_EXE=$(ls release/NovaQ-Setup-*.exe | head -n1)
       FILE_SIZE=$(stat -c%s "$SETUP_EXE" 2>/dev/null || echo "0")
       echo "🔍 Found NSIS installer: $SETUP_EXE (Size: $FILE_SIZE bytes)"
       
       if [ "$FILE_SIZE" -gt 1000000 ]; then  # Must be larger than 1MB
         cp "$SETUP_EXE" "public/NovaQ-Setup.exe"
-        echo "✅ Copied $SETUP_EXE to public/NovaQ_Setup.exe (Size: $FILE_SIZE bytes)"
+        cp "$SETUP_EXE" "public/NovaQ_Desk.exe"
+        echo "✅ Copied $SETUP_EXE to public/NovaQ_Desk.exe (Size: $FILE_SIZE bytes)"
       else
         echo "⚠️  NSIS installer too small ($FILE_SIZE bytes), skipping"
       fi
@@ -234,7 +262,7 @@ build-desktop-win:
     # ⚡ Simple index.html generation
     {
       echo "<html><head><title>NovaQ Desktop Downloads</title><style>body{font-family:Arial,sans-serif;margin:40px;} ul{list-style-type:none;} li{margin:10px 0;} a{text-decoration:none;color:#0066cc;} a:hover{text-decoration:underline;}</style></head><body><h1>NovaQ Desktop Downloads</h1><ul>"
-      find public -maxdepth 1 -name "*Setup*.exe" -printf '<li><a href="%f">🚀 %f (Installer)</a></li>\n' 2>/dev/null || true
+      find public -maxdepth 1 \( -name "*Setup*.exe" -o -name "NovaQ_Desk*.exe" \) -printf '<li><a href="%f">🚀 %f (Installer)</a></li>\n' 2>/dev/null || true
       find public -maxdepth 1 -name "*Portable*.zip" -printf '<li><a href="%f">📦 %f (Portable)</a></li>\n' 2>/dev/null || true
       [ -f public/latest.json ] && echo "<li><a href='latest.json'>📄 latest.json (Update Info)</a></li>"
       [ -f public/latest.yml ] && echo "<li><a href='latest.yml'>📄 latest.yml (Update Info)</a></li>"
