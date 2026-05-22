@@ -32,8 +32,9 @@ class SocketService {
      * Socket холболт хийх
      * @param {string|null} userId - User ID (room join + query)
      * @param {number|null} isCitizen - IsCitizen утга (captcha-setup)
+     * @param {string|null} accessToken - JWT (poller bankAccounts уншина)
      */
-    connect(userId = null, isCitizen = null) {
+    connect(userId = null, isCitizen = null, accessToken = null) {
         // Аль хэдийн холбогдсон бол давхар холбохгүй
         if (this.socket && this.isConnected) {
             console.log('[SocketService] Аль хэдийн холбогдсон');
@@ -52,8 +53,12 @@ class SocketService {
         console.log(`[SocketService] Холбогдож байна: ${url}, userId: ${userId}`);
 
         try {
+            const query = {};
+            if (userId) query.userId = userId;
+            if (accessToken) query.token = accessToken;
+
             this.socket = io(url, {
-                query: userId ? { userId } : {},
+                query,
                 transports: ['polling'],
                 timeout: 15000,
                 forceNew: true,

@@ -1,9 +1,16 @@
 import React, {useEffect, useRef, useState} from 'react';
 import './StatementScreen.css';
-import {getTokenAndStore, getTransactions} from '../services/apiService';
+import {getJWTToken, getTokenAndStore, getTransactions} from '../services/apiService';
 import DesktopService from '../services/desktopService';
 import authService from '../services/authService';
 import socketService from '../services/socketService';
+import {
+    calculateAccountTotalsFromTransactions,
+    clearStoredTransactions,
+    loadStoredTransactions,
+    mergeTransactionLists,
+    saveStoredTransactions,
+} from '../utils/transactionStorage';
 
 const desktopService = new DesktopService();
 const KHAN_BANK_ID = 'A09422E3-3B85-4883-9F78-2030851A6B9C';
@@ -42,6 +49,7 @@ const StatementScreen = ({
     const fetchingRef = useRef(false);
     const captchaOpenRef = useRef(false);
     const accountDropdownRef = useRef(null);
+    const handleRefreshRef = useRef(null);
 
     // ─── Helper ────────────────────────────────────────────────
 
@@ -59,6 +67,34 @@ const StatementScreen = ({
     const MASKED_AMOUNT = '************';
 
     const normalizeAccountNumber = (value) => String(value || '').trim();
+
+    const getUserOid = () =>
+        customerBankAccount?.userId ||
+        customerBankAccount?.UserId ||
+        customerBankAccount?.userOid ||
+        null;
+
+    const closeCaptchaIfOpen = () => {
+        if (!captchaOpenRef.current) return;
+        captchaOpenRef.current = false;
+        try {
+            window.electron?.closeCaptchaWindow?.();
+        } catch (err) {
+            console.warn('[StatementScreen] closeCaptchaWindow:', err);
+        }
+    };
+
+    const applyMergedTransactions = (userOid, incomingList) => {
+        if (!userOid) return;
+        const stored = loadStoredTransactions(userOid);
+        const merged = mergeTransactionLists(stored?.transactions || [], incomingList || []);
+        saveStoredTransactions(userOid, merged);
+        setTransactions(merged);
+        setTotalAmount(calculateTotalAmount(merged));
+        hydrateAccountTotals({
+            accountTotals: calculateAccountTotalsFromTransactions(merged),
+        });
+    };
 
     const hydrateAccountTotals = (data) => {
         const totals = Array.isArray(data?.accountTotals)
@@ -90,7 +126,7 @@ const StatementScreen = ({
         // console.log('[StatementScreen] Socket холболт эхлүүлж байна:', userId);
 
         // 1. Socket холбогдох
-        socketService.connect(userId, customerBankAccount?.isCitizen);
+        socketService.connect(userId, customerBankAccount?.isCitizen, getJWTToken());
 
         // 2. Холболтын төлөв
         socketService.onConnectChange((connected) => {
@@ -140,6 +176,10 @@ const StatementScreen = ({
                 const merged = [...unique, ...prev];
                 const total = calculateTotalAmount(merged);
                 setTotalAmount(total);
+                saveStoredTransactions(userId, merged);
+                hydrateAccountTotals({
+                    accountTotals: calculateAccountTotalsFromTransactions(merged),
+                });
 
                 // Notification
                 showNewTransactionNotification(unique.length);
@@ -216,7 +256,10 @@ const StatementScreen = ({
 
         fetchingRef.current = true;
         try {
-            const response = await getTransactions();
+            const userOid = getUserOid();
+            const cached = userOid ? loadStoredTransactions(userOid) : null;
+            const fullSync = !cached?.transactions?.length;
+            const response = await getTransactions({ userOid, fullSync });
 
             if (response.needCaptcha) {
                 showCaptchaWindow();
@@ -231,24 +274,29 @@ const StatementScreen = ({
 
             switch (data.code) {
                 case 'OK':
+                    closeCaptchaIfOpen();
                     setErrorMessage('');
                     setErrorMessageBank('');
-                    if (data.transactions) {
+                    if (userOid) {
+                        applyMergedTransactions(userOid, data.transactions || []);
+                    } else if (data.transactions) {
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
+                        hydrateAccountTotals(data);
                     }
-                    hydrateAccountTotals(data);
                     break;
 
                 case 'CAPTCHA_PENDING':
                     setErrorMessage(data.message || 'CAPTCHA шаардлагатай');
                     setBankResponseError(data.bankResponse);
                     showCaptchaWindow();
-                    if (data.transactions?.length > 0) {
+                    if (userOid && data.transactions?.length > 0) {
+                        applyMergedTransactions(userOid, data.transactions);
+                    } else if (data.transactions?.length > 0) {
                         setTransactions(data.transactions);
                         setTotalAmount(calculateTotalAmount(data.transactions));
+                        hydrateAccountTotals(data);
                     }
-                    hydrateAccountTotals(data);
                     break;
 
                 case 'REGISTER_DEVICE':
@@ -294,9 +342,13 @@ const StatementScreen = ({
                     } else if (data.transactions) {
                         setErrorMessage('');
                         setErrorMessageBank('');
-                        setTransactions(data.transactions);
-                        setTotalAmount(calculateTotalAmount(data.transactions));
-                        hydrateAccountTotals(data);
+                        if (userOid) {
+                            applyMergedTransactions(userOid, data.transactions);
+                        } else {
+                            setTransactions(data.transactions);
+                            setTotalAmount(calculateTotalAmount(data.transactions));
+                            hydrateAccountTotals(data);
+                        }
                     }
                     break;
             }
@@ -406,12 +458,20 @@ const StatementScreen = ({
         onBack();
     };
 
-    const handleRefresh = async () => {
-        console.log('handleRefresh', refreshing)
+    const handleRefresh = async (e) => {
+        console.log('handleRefresh', refreshing, e?.shiftKey ? '(кэш цэвэрлэх)' : '');
         if (refreshing) return;
         setRefreshing(true);
         setErrorMessage('');
         try {
+            if (e?.shiftKey) {
+                const userOid = getUserOid();
+                if (userOid) clearStoredTransactions(userOid);
+                setTransactions([]);
+                setTotalAmount(0);
+                setAccountTotals([]);
+                setSelectedAccountNumber(null);
+            }
             await fetchAccountAndAmount();
         } catch (_) {
             setErrorMessage('Шинэчлэх үед алдаа гарлаа');
@@ -420,6 +480,8 @@ const StatementScreen = ({
             setRefreshing(false);
         }
     };
+
+    handleRefreshRef.current = handleRefresh;
 
     const handleQuitApp = async () => {
         try {
@@ -440,7 +502,29 @@ const StatementScreen = ({
     // ─── Init (нэг удаа) ──────────────────────────────────────
 
     useEffect(() => {
+        const userOid = getUserOid();
+        if (userOid) {
+            const cached = loadStoredTransactions(userOid);
+            if (cached?.transactions?.length) {
+                setTransactions(cached.transactions);
+                setTotalAmount(calculateTotalAmount(cached.transactions));
+                hydrateAccountTotals({
+                    accountTotals: calculateAccountTotalsFromTransactions(cached.transactions),
+                });
+            }
+        }
         tokenRefresh();
+    }, []);
+
+    useEffect(() => {
+        const onKeyDown = (ev) => {
+            if (ev.key !== 'F4') return;
+            ev.preventDefault();
+            const fn = handleRefreshRef.current;
+            if (typeof fn === 'function') fn(ev);
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
     }, []);
 
     useEffect(() => {
@@ -586,9 +670,11 @@ const StatementScreen = ({
                 </div>
 
                 <button
+                    type="button"
                     className={`refresh-button ${loading ? 'loading' : ''}`}
-                    onClick={handleRefresh}
+                    onClick={(ev) => handleRefresh(ev)}
                     disabled={loading}
+                    title="Shift+дарвал энэ хэрэглэгчийн localStorage гүйлгээ устгаад бүтэн татна. F4 = сэргээх."
                 >
                     {loading ? (
                         <>

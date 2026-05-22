@@ -1,4 +1,5 @@
 const { API_CONFIG  } = require('../utils/constants');
+const { buildSinceByBank } = require('../utils/transactionStorage');
 
 // Get correct API URL based on environment
 const getApiUrl = () => {
@@ -299,10 +300,16 @@ const getTokenAndStore = async (userOid) => {
 };
 
 
-// Get transactions
-const getTransactions = async () => {
+const formatTodayYmd = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// Get transactions (delta: localStorage sinceByBank → зөвхөн шинэ мөр)
+const getTransactions = async ({ userOid, fullSync = false } = {}) => {
   try {
-    console.log('🔍 getTransactions дуудагдаж байна');
+    console.log('🔍 getTransactions дуудагдаж байна', { userOid, fullSync });
 
     // JWT token авах
     const jwtToken = await getJWTToken();
@@ -316,13 +323,26 @@ const getTransactions = async () => {
 
     const apiBaseUrl = getApiUrl();
     const fetchFn = getFetch();
-    const res = await fetchFn(`${apiBaseUrl}/api/desktop/transactions/all`, {
-      method: 'GET', // GET method ашиглах (JWT token header-ээс авах)
+    const params = new URLSearchParams();
+    const today = formatTodayYmd();
+    params.set('from', today);
+    params.set('to', today);
+
+    if (fullSync) {
+      params.set('full', '1');
+    } else if (userOid) {
+      const sinceByBank = buildSinceByBank(userOid);
+      if (sinceByBank) {
+        params.set('sinceByBank', JSON.stringify(sinceByBank));
+      }
+    }
+
+    const res = await fetchFn(`${apiBaseUrl}/api/desktop/transactions/all?${params.toString()}`, {
+      method: 'GET',
       headers: {
         'Authorization': `Bearer ${jwtToken}`,
         'Content-Type': 'application/json'
       }
-      // Body-гүй - server дээр JWT token-оос userOid авах
     });
 
     // if (!res.ok) {
@@ -375,7 +395,8 @@ const getTransactions = async () => {
 
     console.log('✅ Transactions амжилттай авлаа:', {
       success: data.success,
-      count: normalizedData.transactions?.length || 0
+      syncMode: payloadData?.syncMode || (fullSync ? 'full' : 'delta'),
+      newCount: normalizedData.transactions?.length || 0
     });
 
     return { data: normalizedData, errorMessage: null };
