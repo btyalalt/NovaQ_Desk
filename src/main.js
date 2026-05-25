@@ -20,7 +20,7 @@ if (process.platform === 'win32') {
     app.commandLine.appendSwitch('disable-sync');
     app.commandLine.appendSwitch('disable-extensions');
     app.commandLine.appendSwitch('disable-plugins');
-    app.commandLine.appendSwitch('disable-images');
+    // disable-images: Khan login SPA цагаан дэлгэц гаргах — бүү идэвхжүүл
     app.commandLine.appendSwitch('disable-javascript-harmony-shipping');
     app.commandLine.appendSwitch('disable-features', 'TranslateUI');
     app.commandLine.appendSwitch('disable-features', 'MediaRouter');
@@ -240,15 +240,17 @@ const getAppVersion = () => {
 };
 
 
-// Environment-based API Base URL
-const isDevelopment = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
-// Backend API server runs on port 3101, webpack dev server runs on port 3201
-const API_BASE_URL_DEV = process.env.API_BASE_URL_DEV || 'http://103.168.56.34:3130';
-const API_BASE_URL = (app.isPackaged || !isDevelopment)
-  ? (process.env.API_BASE_URL || PROD_API_URL)
-  : API_BASE_URL_DEV;
-const API_WS_BASE_URL_DEV = API_BASE_URL_DEV.replace(/^http/, 'ws');
-const API_WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
+const {
+  resolveApiBaseUrl,
+  resolveWsBaseUrl,
+  logRuntimeApi,
+  isDevCli,
+} = require('./config/runtimeApiConfig');
+
+const isDevelopment = isDevCli();
+const API_BASE_URL = resolveApiBaseUrl({ packaged: app.isPackaged });
+const API_WS_BASE_URL = resolveWsBaseUrl(API_BASE_URL);
+logRuntimeApi('MAIN');
 
 // Renderer preload: runtime API URL (.env-ээс, webpack rebuild шаардлагагүй)
 ipcMain.on('get-api-base-url-sync', (event) => {
@@ -1499,7 +1501,7 @@ app.whenReady().then(() => {
         "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
         "style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data: https:; " +
-        `connect-src 'self' ${API_BASE_URL_DEV} ${API_BASE_URL} https://desktop-f96376.gitlab.io/ ${API_WS_BASE_URL_DEV} ${API_WS_BASE_URL} https://api.ipify.org;`
+        `connect-src 'self' ${API_BASE_URL} https://desktop-f96376.gitlab.io/ ${API_WS_BASE_URL} https://api.ipify.org;`
       ];
       
       callback({ responseHeaders });

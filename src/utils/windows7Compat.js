@@ -119,18 +119,17 @@ class WindowsCompatibility {
      * Get appropriate User Agent for Windows
      */
     getCompatibleUserAgent() {
-        const chromeVersion = '120';
+        // Electron 11 ≈ Chromium 87 — Chrome/120 гэж хэлбэл Khan хэт шинэ JS илгээнэ
+        const chromeVersion = (process.versions && process.versions.chrome) || '87.0.4280.141';
         const webkitVersion = '537.36';
-        
+
         switch (this.windowsVersion) {
             case '7':
                 return `Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/${webkitVersion} (KHTML, like Gecko) Chrome/${chromeVersion} Safari/${webkitVersion}`;
             case '8':
                 return `Mozilla/5.0 (Windows NT 6.2; WOW64) AppleWebKit/${webkitVersion} (KHTML, like Gecko) Chrome/${chromeVersion} Safari/${webkitVersion}`;
             case '10':
-                return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/${webkitVersion} (KHTML, like Gecko) Chrome/${chromeVersion} Safari/${webkitVersion}`;
             case '11':
-                return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/${webkitVersion} (KHTML, like Gecko) Chrome/${chromeVersion} Safari/${webkitVersion}`;
             default:
                 return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/${webkitVersion} (KHTML, like Gecko) Chrome/${chromeVersion} Safari/${webkitVersion}`;
         }
@@ -188,9 +187,9 @@ class WindowsCompatibility {
      * Setup Windows specific event listeners
      */
     setupWindowsEventListeners(window) {
-        if (!this.isLegacyWindows) return;
+        if (process.platform !== 'win32' || !window?.webContents) return;
 
-        console.log(`🔧 Setting up Windows ${this.windowsVersion} specific event listeners`);
+        console.log(`🔧 CAPTCHA window listeners (Windows ${this.windowsVersion || '?'})`);
 
         // Enhanced error handling for legacy Windows
         window.webContents.on('crashed', () => {
@@ -260,7 +259,9 @@ class WindowsCompatibility {
             console.log(`🔄 Windows ${this.windowsVersion} network error - attempting retry`);
             setTimeout(() => {
                 try {
-                    window.loadURL(url);
+                    if (!window.isDestroyed()) {
+                        window.webContents.loadURL(validatedURL || url);
+                    }
                 } catch (error) {
                     console.error(`❌ Windows ${this.windowsVersion} retry failed:`, error);
                 }
@@ -285,13 +286,18 @@ class WindowsCompatibility {
     /**
      * Apply Windows compatibility fixes to session
      */
-    applySessionFixes() {
-        if (!this.isLegacyWindows) return;
+    applySessionFixes(targetSession = session.defaultSession) {
+        if (!this.isLegacyWindows) {
+            try {
+                targetSession.setUserAgent(this.getCompatibleUserAgent());
+            } catch (_) { /* */ }
+            return;
+        }
 
         console.log(`🔧 Applying Windows ${this.windowsVersion} session compatibility fixes`);
 
         try {
-            const defaultSession = session.defaultSession;
+            const defaultSession = targetSession;
             
             // Disable hardware acceleration for legacy Windows
             defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -356,6 +362,58 @@ class WindowsCompatibility {
         } else {
             return 3000; // 3 seconds for modern Windows
         }
+    }
+
+    /**
+     * Login дараах цагаан хуудас — reload / алдааны мэдээлэл
+     * @param {import('electron').BrowserWindow} window
+     * @param {(level: string, tag: string, msg: string, extra?: object) => void} [logFn]
+     */
+    setupBlankPageRecovery(window, logFn = () => {}) {
+        if (!window?.webContents) return;
+
+        let blankRecoverAttempts = 0;
+        const MAX_BLANK_RECOVER = 2;
+
+        const checkBlank = async () => {
+            if (window.isDestroyed()) return;
+            try {
+                const info = await window.webContents.executeJavaScript(`({
+                    ready: document.readyState,
+                    bodyLen: (document.body && document.body.innerText) ? document.body.innerText.trim().length : 0,
+                    childCount: document.body ? document.body.children.length : 0,
+                    url: location.href
+                })`, true);
+
+                const isLoginHost =
+                    /khanbank\\.com/i.test(info.url || '') &&
+                    !String(info.url || '').startsWith('about:');
+                const looksBlank =
+                    isLoginHost && info.bodyLen < 30 && info.childCount < 4;
+
+                if (looksBlank && blankRecoverAttempts < MAX_BLANK_RECOVER) {
+                    blankRecoverAttempts += 1;
+                    logFn(
+                        'warn',
+                        'COMPAT',
+                        'хоосон хуудас — reload',
+                        { attempt: blankRecoverAttempts, ...info, os: this.windowsVersion }
+                    );
+                    window.webContents.reload();
+                }
+            } catch (err) {
+                logFn('warn', 'COMPAT', 'blank check алдаа', { error: err.message });
+            }
+        };
+
+        const scheduleCheck = () => {
+            const delay = this.isWindows7 ? 2500 : 1500;
+            setTimeout(checkBlank, delay);
+        };
+
+        window.webContents.on('did-finish-load', scheduleCheck);
+        window.webContents.on('did-navigate-in-page', scheduleCheck);
+        window.webContents.on('did-navigate', scheduleCheck);
     }
 }
 

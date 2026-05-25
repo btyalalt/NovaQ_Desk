@@ -7,14 +7,10 @@ const http = require('http');
 const { getMainProcessJwt } = require('./mainJwt');
 const { captchaLog } = require('./captchaDebugLog');
 
+const { resolveApiBaseUrl } = require('../config/runtimeApiConfig');
+
 function getMainApiUrl() {
-    const isDev =
-        process.env.NODE_ENV === 'development' ||
-        (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
-    if (isDev) {
-        return process.env.API_BASE_URL_DEV || 'http://103.168.56.34:3130';
-    }
-    return process.env.API_BASE_URL || 'https://novaq.mn:3119';
+    return resolveApiBaseUrl();
 }
 
 function httpPostJson(url, headers, body) {

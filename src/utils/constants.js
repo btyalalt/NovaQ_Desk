@@ -13,51 +13,24 @@ const getPackageVersion = () => {
   return '1.0.0'; // Fallback version
 };
 
-const VERSION = process.env.APP_VERSION || getPackageVersion(); // Dynamic version from environment or package.json
-const PROD_API_URL = 'https://novaq.mn:3119';
-const DEV_API_BASE_URL = process.env.API_BASE_URL_DEV || 'http://103.168.56.34:3130';
-const PROD_API_BASE_URL = process.env.API_BASE_URL || PROD_API_URL;
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
-const BUFFER_TIME = 30 * 1000; // 30 seconds
+const { resolveApiBaseUrl, isDevCli } = require('../config/runtimeApiConfig');
 
-// Check if we're in development mode - exclude portable mode
+const VERSION = process.env.APP_VERSION || getPackageVersion();
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
+const BUFFER_TIME = 30 * 1000;
+
 const isPortableMode = process.execPath && process.execPath.includes('NovaQ Desktop.exe');
 const isElectronApp = typeof window !== 'undefined' && window.electron;
-const isDevelopment = !isPortableMode && !isElectronApp && (
-                     process.env.NODE_ENV === 'development' || 
-                     process.argv.includes('--dev') ||
-                     (typeof window !== 'undefined' && window.location.hostname === 'localhost') ||
-                     (typeof window !== 'undefined' && window.location.protocol === 'file:' && 
-                      (window.location.pathname.includes('src') || window.location.pathname.includes('dev')))
-);
+const isDevelopment =
+    isDevCli() ||
+    (!isPortableMode &&
+        !isElectronApp &&
+        typeof window !== 'undefined' &&
+        (window.location.hostname === 'localhost' || window.location.protocol === 'file:'));
 
-// Debug logging - only log once per session (check if we're in browser or main process)
-const isBrowser = typeof window !== 'undefined';
-const constantsLoggedKey = isBrowser ? 'constantsLogged' : '__constantsLogged__';
-const globalObj = isBrowser ? window : global;
-
-if (!globalObj[constantsLoggedKey]) {
-  globalObj[constantsLoggedKey] = true;
-  console.log('🔍 [CONSTANTS] Environment detection:');
-  console.log('🔍 [CONSTANTS] NODE_ENV:', process.env.NODE_ENV);
-  console.log('🔍 [CONSTANTS] APP_VERSION:', process.env.APP_VERSION);
-  console.log('🔍 [CONSTANTS] VERSION:', VERSION);
-  console.log('🔍 [CONSTANTS] process.argv:', process.argv);
-  console.log('🔍 [CONSTANTS] isDevelopment:', isDevelopment);
-}
-
-// API Configuration — dev (--dev) үед test URL; packaged/portable үед prod
-const isDevMode =
-  process.env.NODE_ENV === 'development' ||
-  (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
-const useProdApi = !isDevMode && (process.env.NODE_ENV === 'production' || isPortableMode);
 let API_CONFIG = {
-  BASE_URL: useProdApi ? PROD_API_BASE_URL : DEV_API_BASE_URL
+    BASE_URL: resolveApiBaseUrl(),
 };
-
-if (!globalObj[constantsLoggedKey]) {
-  console.log('🔍 [CONSTANTS] API_CONFIG.BASE_URL:', API_CONFIG.BASE_URL);
-}
 
 
 

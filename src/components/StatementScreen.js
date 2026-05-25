@@ -50,6 +50,13 @@ const StatementScreen = ({
     const captchaOpenRef = useRef(false);
     const accountDropdownRef = useRef(null);
     const handleRefreshRef = useRef(null);
+    const bankAccountRef = useRef(customerBankAccount);
+    bankAccountRef.current = customerBankAccount;
+
+    const bankUserId =
+        customerBankAccount?.userId ||
+        customerBankAccount?.UserId ||
+        null;
 
     // ─── Helper ────────────────────────────────────────────────
 
@@ -127,17 +134,64 @@ const StatementScreen = ({
         );
     };
 
-    // ─── Socket setup (нэг удаа) ──────────────────────────────
+    // ─── Socket + эхлүүлэлт (CAPTCHA-аас өмнө socket холбохгүй) ───
 
     useEffect(() => {
-        const userId = customerBankAccount?.userId || customerBankAccount?.UserId;
-        if (!userId) return;
+        if (!bankUserId) return;
 
-        // console.log(`[StatementScreen] Socket холболт эхлүүлж байна: customerBankAccount :`, customerBankAccount);
-        // console.log('[StatementScreen] Socket холболт эхлүүлж байна:', userId);
+        const userId = bankUserId;
+        let cancelled = false;
+        const account = bankAccountRef.current;
+        const isCitizen = account?.isCitizen ?? account?.IsCitizen ?? 1;
+        const captchaPendingFromDb =
+            Number(account?.captchaClose ?? account?.CaptchaClose ?? 1) === 0;
 
-        // 1. Socket холбогдох
-        socketService.connect(userId, customerBankAccount?.isCitizen, getJWTToken());
+        const prepareCaptchaBeforeSocket = async () => {
+            if (!captchaPendingFromDb || captchaOpenRef.current) return;
+            captchaOpenRef.current = true;
+            setErrorMessage('');
+            try {
+                const result = await window.electron.createCaptchaWindow(isCitizen);
+                if (result && result.success === false) {
+                    throw new Error(result.error || 'CAPTCHA цонх үүсгэж чадсангүй');
+                }
+            } catch (err) {
+                console.error('❌ CAPTCHA (socket-ээс өмнө) алдаа:', err);
+                captchaOpenRef.current = false;
+                setErrorMessage('CAPTCHA нээхэд алдаа гарлаа');
+            }
+        };
+
+        const runInit = async () => {
+            await prepareCaptchaBeforeSocket();
+            if (cancelled) return;
+
+            socketService.connect(userId, isCitizen, getJWTToken());
+
+            if (captchaPendingFromDb && captchaOpenRef.current) {
+                socketService.emitCaptchaSetup(userId, isCitizen);
+                desktopService.clearKhanBankCookiesFromServer(['all_cookies']).catch((err) => {
+                    console.warn('⚠️ KhanBank cookies цэвэрлэх алдаа:', err?.message);
+                });
+            }
+
+            const userOid = getUserOid();
+            if (userOid) {
+                const cached = loadStoredTransactions(userOid);
+                if (cached?.transactions?.length) {
+                    setTransactions(cached.transactions);
+                    setTotalAmount(calculateTotalAmount(cached.transactions));
+                    hydrateAccountTotals({
+                        accountTotals: calculateAccountTotalsFromTransactions(cached.transactions),
+                    });
+                }
+            }
+            if (!cancelled) {
+                await tokenRefresh();
+            }
+        };
+
+        runInit();
 
         // 2. Холболтын төлөв
         socketService.onConnectChange((connected) => {
@@ -151,7 +205,8 @@ const StatementScreen = ({
             // User шалгалт
             if (data.data.userOid && data.data.userOid !== userId) return;
 
-            const fallbackBankId = String(customerBankAccount?.bankId || customerBankAccount?.BankId || '').toUpperCase();
+            const acct = bankAccountRef.current;
+            const fallbackBankId = String(acct?.bankId || acct?.BankId || '').toUpperCase();
             const incoming = data.data.transactions.map((tx) => ({
                 ...tx,
                 bankId: String(tx?.bankId || fallbackBankId).toUpperCase(),
@@ -228,18 +283,18 @@ const StatementScreen = ({
             setErrorMessage('Token дууссан байна, дахин нэвтрэх шаардлагатай');
         });
 
-        // Cleanup
+        // Cleanup — зөвхөн userId солигдох / дэлгэцээс гарах үед (customerBankAccount ref өөрчлөгдөхөд биш)
         return () => {
-            console.log('[StatementScreen] Socket disconnect');
+            cancelled = true;
+            console.log('[StatementScreen] Socket disconnect (userId change / unmount)');
             socketService.disconnect();
 
-            // ← Unmount болоход CAPTCHA цонх нээлттэй бол хаах
             if (captchaOpenRef.current) {
                 captchaOpenRef.current = false;
                 window.electron?.closeCaptchaWindow?.();
             }
         };
-    }, [customerBankAccount]);
+    }, [bankUserId]);
 
     // ─── Notification ──────────────────────────────────────────
 
@@ -289,9 +344,11 @@ const StatementScreen = ({
 
             switch (data.code) {
                 case 'OK':
-                    closeCaptchaIfOpen();
-                    setErrorMessage('');
-                    setErrorMessageBank('');
+                    // CAPTCHA цонхыг зөвхөн onCaptchaDone (CaptchaClose 0→1) дээр хаана
+                    if (!captchaOpenRef.current) {
+                        setErrorMessage('');
+                        setErrorMessageBank('');
+                    }
                     if (userOid) {
                         applyMergedTransactions(userOid, data.transactions || []);
                     } else if (data.transactions) {
@@ -409,7 +466,9 @@ const StatementScreen = ({
                 if (result.success) {
                     await fetchAccountAndAmount({ fullSync: true });
                 } else {
-                    if (result.needCaptcha) showCaptchaWindow();
+                    if (result.needCaptcha && !captchaOpenRef.current) {
+                        showCaptchaWindow();
+                    }
 
 
                     setErrorMessage(result.errorMessage || 'Token авахад алдаа гарлаа');
@@ -417,7 +476,7 @@ const StatementScreen = ({
                         setErrorMessageBank(result.bankResponse.errorCode + ' : ' + result.bankResponse.bankMessage)
                     }
                 }
-            } else {
+            } else if (!captchaOpenRef.current) {
                 showCaptchaWindow();
             }
         } catch (error) {
@@ -436,19 +495,33 @@ const StatementScreen = ({
             return;
         }
 
-        captchaOpenRef.current = true;
-
         const userOid = getUserOid();
+        const isCitizen = customerBankAccount?.isCitizen ?? customerBankAccount?.IsCitizen ?? 1;
+
+        captchaOpenRef.current = true;
+        setErrorMessage('');
 
         try {
-            await desktopService.clearKhanBankCookiesFromServer(['all_cookies']);
-            await window.electron.createCaptchaWindow(customerBankAccount.isCitizen);
-            // Цонх нээгдсний дараа listener бүртгэх (CaptchaClose=1 үед шууд хаахгүй)
-            socketService.emitCaptchaSetup(userOid, customerBankAccount?.isCitizen);
+            // Цонх эхлээд нээгдэнэ — cookie цэвэрлэлт хүлээлгэхгүй
+            const result = await window.electron.createCaptchaWindow(isCitizen);
+            if (result && result.success === false) {
+                throw new Error(result.error || 'CAPTCHA цонх үүсгэж чадсангүй');
+            }
+
+            if (userOid) {
+                socketService.emitCaptchaSetup(userOid, isCitizen);
+            }
+
+            desktopService.clearKhanBankCookiesFromServer(['all_cookies']).catch((err) => {
+                console.warn('⚠️ KhanBank cookies цэвэрлэх алдаа (үргэлжлүүлнэ):', err?.message);
+            });
         } catch (err) {
             console.error('❌ CAPTCHA нээхэд алдаа:', err);
             setErrorMessage('CAPTCHA нээхэд алдаа гарлаа');
             captchaOpenRef.current = false;
+            try {
+                await window.electron?.closeCaptchaWindow?.();
+            } catch (_) { /* */ }
         }
     };
 
@@ -513,23 +586,6 @@ const StatementScreen = ({
             console.error('❌ Quit app алдаа:', error);
         }
     };
-
-    // ─── Init (нэг удаа) ──────────────────────────────────────
-
-    useEffect(() => {
-        const userOid = getUserOid();
-        if (userOid) {
-            const cached = loadStoredTransactions(userOid);
-            if (cached?.transactions?.length) {
-                setTransactions(cached.transactions);
-                setTotalAmount(calculateTotalAmount(cached.transactions));
-                hydrateAccountTotals({
-                    accountTotals: calculateAccountTotalsFromTransactions(cached.transactions),
-                });
-            }
-        }
-        tokenRefresh();
-    }, []);
 
     useEffect(() => {
         const onKeyDown = (ev) => {
