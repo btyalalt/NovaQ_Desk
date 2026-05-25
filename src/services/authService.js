@@ -1,6 +1,6 @@
 import { saveUser } from '../utils/userStorage';
 import { saveJWTToken, clearJWTToken, getJWTToken } from './apiService';
-import { API_CONFIG } from '../utils/constants';
+import { getApiUrl as resolveApiUrl } from '../utils/apiUrl';
 import packageJson from '../../package.json';
 
 // Get fetch function based on environment
@@ -19,34 +19,8 @@ class AuthService {
     this.currentUser = null;
   }
 
-  // Get correct API URL based on environment
   getApiUrl() {
-    // Check if we're in Electron environment
-    if (typeof window !== 'undefined' && window.electron) {
-      // Check environment to determine API URL
-      const isDevelopment = process.env.NODE_ENV === 'development' || 
-                           (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
-      
-      if (isDevelopment) {
-        return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
-      } else {
-        return API_CONFIG.BASE_URL;
-      }
-    }
-    
-    // In browser environment (non-Electron), check if we're on localhost
-    if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
-      const isRealDevelopment = process.env.NODE_ENV === 'development' && 
-                                !process.execPath.includes('electron');
-      
-      if (isRealDevelopment && 
-          (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-        return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
-      }
-    }
-    
-    // Use production URL or configured URL
-    return API_CONFIG.BASE_URL;
+    return resolveApiUrl();
   }
 
   static getInstance() {

@@ -1,44 +1,19 @@
 const { API_CONFIG } = require('../utils/constants');
+const { getApiUrl } = require('../utils/apiUrl');
 const { getJWTToken } = require('./apiService');
+
+let captchaLog = () => {};
+try {
+  ({ captchaLog } = require('../utils/captchaDebugLog'));
+} catch (_) { /* renderer webpack — optional */ }
 const https = require('https');
 const http = require('http');
-
-const getApiUrl = () => {
-    // Check if we're in Electron environment
-    if (typeof window !== 'undefined' && window.electron) {
-        // Check environment to determine API URL
-        const isDevelopment = process.env.NODE_ENV === 'development' ||
-            (typeof process !== 'undefined' && process.argv && process.argv.includes('--dev'));
-
-        if (isDevelopment) {
-            return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
-        } else {
-            return API_CONFIG.BASE_URL;
-        }
-    }
-
-    // In browser environment (non-Electron), check if we're on localhost
-    if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
-        const isRealDevelopment = process.env.NODE_ENV === 'development' &&
-            !process.execPath.includes('electron');
-
-        if (isRealDevelopment &&
-            (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-            return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
-        }
-    }
-
-    // Use production URL or configured URL
-    return API_CONFIG.BASE_URL;
-};
-// Main process-д JWT token авах функц
+// JWT: renderer → localStorage; main → global (cookie-collector mainJwt.js ашиглана)
 function getJWTTokenForMainProcess() {
-  // Main process: use token already shared from electron-store/login flow.
   if (typeof global !== 'undefined' && global.currentAuthToken) {
     return global.currentAuthToken;
   }
 
-  // Renderer fallback: read from localStorage if available.
   const rendererToken = getJWTToken();
   if (rendererToken && typeof global !== 'undefined') {
     global.currentAuthToken = rendererToken;
@@ -108,7 +83,7 @@ class DesktopService {
 
 
   constructor() {
-    this.baseUrl = API_CONFIG.BASE_URL;
+    this.baseUrl = getApiUrl();
   }
 
   // ✅ KhanBank Cookies цэвэрлэх
@@ -155,7 +130,7 @@ class DesktopService {
     }
   }
 
-  // ✅ KhanBank Cookies хадгалах
+  // ✅ KhanBank Cookies хадгалах (зөвхөн renderer/webpack). CAPTCHA insert → khanBankCookieInsert.js (main)
   async insertKhanBankCookiesToServer(params) {
     try {
       const {
@@ -169,7 +144,8 @@ class DesktopService {
         bankAccountNum,
         requestPayload,
         responsePayload,
-        isResponseHeader
+        isResponseHeader,
+        jwtToken: jwtOverride,
       } = params;
 
       if (!url) {
@@ -177,7 +153,7 @@ class DesktopService {
         return false;
       }
 
-      const jwtToken = getJWTTokenForMainProcess();
+      const jwtToken = jwtOverride || getJWTTokenForMainProcess();
       if (!jwtToken) {
         // Skip cookie sync until auth token is available to avoid noisy 401 loops.
         console.warn('⚠️ JWT token байхгүй тул cookies sync түр алгасав');
@@ -200,9 +176,22 @@ class DesktopService {
         isResponseHeader
       };
       
+      const apiBaseUrl = getApiUrl();
+      const fromCaptcha = !!jwtOverride;
+      if (fromCaptcha) {
+        captchaLog('info', 'API', 'insert-khanbank-cookies дуудаж байна', {
+          apiBaseUrl,
+          url,
+          bankAccountNum,
+          headerKeys: headers ? Object.keys(headers).length : 0,
+          hasRequestPayload: !!requestPayload,
+          hasResponsePayload: !!responsePayload,
+        });
+      }
+
       if (typeof fetch !== 'undefined') {
-        console.log('🔧 Using fetch for KhanBank cookies API call');
-        response = await fetch(`${this.baseUrl}/api/desktop/insert-khanbank-cookies`, {
+        if (!fromCaptcha) console.log('🔧 Using fetch for KhanBank cookies API call');
+        response = await fetch(`${apiBaseUrl}/api/desktop/insert-khanbank-cookies`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -212,7 +201,7 @@ class DesktopService {
         });
       } else {
         console.log('🔧 Using https module for KhanBank cookies API call');
-        response = await httpsRequest(`${this.baseUrl}/api/desktop/insert-khanbank-cookies`, {
+        response = await httpsRequest(`${apiBaseUrl}/api/desktop/insert-khanbank-cookies`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -223,10 +212,26 @@ class DesktopService {
 
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ KhanBank cookies хадгалагдлаа:', result);
-        return true;
+        const count = result?.insertedCount ?? 0;
+        if (fromCaptcha) {
+          captchaLog(count > 0 ? 'ok' : 'warn', 'API', 'insert хариу', {
+            insertedCount: count,
+            dataTypes: result?.dataTypes,
+            message: result?.message,
+          });
+        } else if (count > 0) {
+          console.log('✅ KhanBank cookies хадгалагдлаа:', result);
+        } else {
+          console.warn('⚠️ KhanBank cookies API OK гэхдээ insertedCount=0:', result);
+        }
+        return count > 0;
       } else {
-        console.error('❌ Server-ээс cookies хадгалахад алдаа:', response.status);
+        const errText = await response.text().catch(() => '');
+        if (fromCaptcha) {
+          captchaLog('error', 'API', 'insert HTTP алдаа', { status: response.status, errText });
+        } else {
+          console.error('❌ Server-ээс cookies хадгалахад алдаа:', response.status, errText);
+        }
         return false;
       }
     } catch (error) {
@@ -239,9 +244,9 @@ class DesktopService {
 
   // ✅ Expose-Headers шалгаж, CustomerBankCookiesUpdate процедур дуудах
   async checkExposeHeaders(params) {
-    const { isCitizen, exposeHeaders } = params;
+    const { isCitizen, exposeHeaders, jwtToken: jwtOverride } = params;
     try {
-      const jwtToken = getJWTTokenForMainProcess();
+      const jwtToken = jwtOverride || getJWTTokenForMainProcess();
       console.log('🔍 checkExposeHeaders JWT token:', jwtToken);
       
       if (!jwtToken) {
@@ -249,13 +254,13 @@ class DesktopService {
         return { success: false, skipped: true, reason: 'missing_jwt' };
       }
       
-      // Try fetch first, fallback to https module
+      const apiBaseUrl = getApiUrl();
       let response;
       const requestData = { isCitizen, exposeHeaders };
       
       if (typeof fetch !== 'undefined') {
         console.log('🔧 Using fetch for expose headers API call');
-        response = await fetch(`${this.baseUrl}/api/desktop/check-expose-headers`, {
+        response = await fetch(`${apiBaseUrl}/api/desktop/check-expose-headers`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -265,7 +270,7 @@ class DesktopService {
         });
       } else {
         console.log('🔧 Using https module for expose headers API call');
-        response = await httpsRequest(`${this.baseUrl}/api/desktop/check-expose-headers`, {
+        response = await httpsRequest(`${apiBaseUrl}/api/desktop/check-expose-headers`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

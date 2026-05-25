@@ -21,6 +21,7 @@ if (typeof window !== 'undefined' && !window.electron && !window.process?.versio
   };
 
   window.electron = {
+    apiBaseUrl: process.env.API_BASE_URL_DEV || 'http://103.168.56.34:3130',
     invoke: async (method, ...args) => {
       // console.log(`🔌 Mock Electron: ${method}`, args); // Disabled for cleaner console
       

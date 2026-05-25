@@ -8,6 +8,7 @@
     "start": "cross-env NODE_ENV=production APP_VERSION=1.0.4 electron .",
     "start:prod": "cross-env NODE_ENV=production APP_VERSION=1.0.4 electron .",
     "dev": "cross-env NODE_ENV=development APP_VERSION=1.0.4 electron . --dev --no-asar",
+    "dev:test": "npm run webpack:build && cross-env NODE_ENV=development APP_VERSION=1.0.4 electron . --dev --no-asar",
     "webpack:dev": "webpack serve --mode development",
     "webpack:build": "cross-env NODE_ENV=development webpack --mode development",
     "webpack:build:prod": "npm run build:updater:32 && cross-env NODE_ENV=production API_BASE_URL=https://novaq.mn:3119 APP_VERSION=1.0.4 webpack --mode production",

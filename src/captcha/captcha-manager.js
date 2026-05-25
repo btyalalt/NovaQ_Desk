@@ -1,10 +1,14 @@
 // ============================================================
-// captcha/captcha-manager.js — CAPTCHA цонхны lifecycle
+// captcha/captcha-manager.js — CAPTCHA цонхны lifecycle (ИДЭВХТЭЙ)
+// main.js → create-captcha-window | StatementScreen → socket captcha-setup
+// Cookie insert: cookie-collector → khanBankCookieInsert (main only)
+// Цонх хаах: socketService onCaptchaDone → server CaptchaClose=1
 // ============================================================
 const { BrowserWindow } = require('electron');
 const path = require('path');
 const WindowsCompatibility = require('../utils/windows7Compat');
 const CookieCollector = require('../socket/cookie-collector');
+const { setCaptchaLogRenderer, captchaLog } = require('../utils/captchaDebugLog');
 
 const winCompat = new WindowsCompatibility();
 
@@ -68,14 +72,18 @@ class CaptchaManager {
 
         this.window.once('ready-to-show', () => {
             console.log('[CaptchaManager] ready-to-show');
-
-            const delay = winCompat.isWindows7 ? 2000 : 0;
-            setTimeout(() => {
-                // CookieCollector эхлүүлэх
-                this.cookieCollector = new CookieCollector(this.window, isCitizen, winCompat);
-                this.cookieCollector.install();
-            }, delay);
+            if (mainWindow?.webContents && !mainWindow.isDestroyed()) {
+                setCaptchaLogRenderer(mainWindow.webContents);
+            }
         });
+
+        const startCookieCollector = () => {
+            if (!this.window || this.window.isDestroyed()) return;
+            if (this.cookieCollector) return;
+                captchaLog('info', 'MANAGER', 'CookieCollector эхлүүлж байна', { isCitizen });
+            this.cookieCollector = new CookieCollector(this.window, isCitizen, winCompat);
+            this.cookieCollector.install();
+        };
 
         // ─── KhanBank URL ачаалах ───
         const loadDelay = winCompat.getLoadingDelay();
@@ -84,6 +92,8 @@ class CaptchaManager {
             try {
                 await winCompat.loadURLWithRetry(this.window.webContents, captchaUrl);
                 console.log('[CaptchaManager] KhanBank URL ачааллаа');
+                const hookDelay = winCompat.isWindows7 ? 2000 : 300;
+                setTimeout(startCookieCollector, hookDelay);
             } catch (err) {
                 console.error('[CaptchaManager] URL ачаалах алдаа:', err.message);
             }

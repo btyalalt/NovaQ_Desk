@@ -84,7 +84,7 @@ const AppWithUpdateScreen = () => {
 const updateCSP = () => {
   const metaCSP = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
   if (metaCSP) {
-    const devApiBaseUrl = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
+    const devApiBaseUrl = process.env.API_BASE_URL_DEV || 'http://103.168.56.34:3130';
     const devApiWsBaseUrl = devApiBaseUrl.replace(/^http/, 'ws');
     const apiBaseUrl = process.env.API_BASE_URL || 'https://novaq.mn:3119';
     const apiWsBaseUrl = apiBaseUrl.replace(/^http/, 'ws');
@@ -134,7 +134,12 @@ const setupDevConsoleLog = () => {
     console.log('🔧 Registering dev-console-log listener...');
     // Listen for dev console logs from main process
     window.electron.receive('dev-console-log', (event, data) => {
-      console.log('🔧 Received dev-console-log:', data);
+      if (data?.type === 'captcha-insert') {
+        const fn = console[data.level] || console.log;
+        fn(data.message || '[CAPTCHA→DB]');
+        if (data.extra) fn(data.extra);
+        return;
+      }
       if (data && data.message) {
         console.log(data.message);
       }

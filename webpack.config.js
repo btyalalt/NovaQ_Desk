@@ -11,7 +11,7 @@ const isDevelopment = process.env.NODE_ENV !== 'production';
 const apiBaseUrl = isDevelopment
   ? (process.env.API_BASE_URL || PROD_API_URL)
   : PROD_API_URL;
-const apiBaseUrlDev = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
+const apiBaseUrlDev = process.env.API_BASE_URL_DEV || 'http://103.168.56.34:3130';
 const apiWsBaseUrlDev = apiBaseUrlDev.replace(/^http/, 'ws');
 const apiWsBaseUrl = apiBaseUrl.replace(/^http/, 'ws');
 const cspContent = [

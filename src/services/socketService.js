@@ -8,7 +8,6 @@
 //   - joinRoom emit (user-specific room)
 
 const io = require('socket.io-client');
-const { API_CONFIG } = require('../utils/constants');
 
 class SocketService {
     constructor() {
@@ -151,6 +150,7 @@ class SocketService {
     // socketService.js дотор:
 
     emitCaptchaSetup(userOid, isCitizen) {
+        if (isCitizen != null) this._isCitizen = isCitizen;
         if (this._isReady()) {
             this.socket.emit('captcha-setup', { userOid, isCitizen });
             console.log('[SocketService] captcha-setup илгээгдлээ');
@@ -294,21 +294,8 @@ class SocketService {
     }
 
     _getApiUrl() {
-        if (typeof window !== 'undefined' && window.electron) {
-            const isDev = process.env.NODE_ENV === 'development' ||
-                (typeof process !== 'undefined' && process.argv?.includes('--dev'));
-            return isDev ? (process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL) : API_CONFIG.BASE_URL;
-        }
-
-        if (typeof window !== 'undefined' && !window.electron && typeof process !== 'undefined') {
-            const isDev = process.env.NODE_ENV === 'development' &&
-                !process.execPath?.includes('electron');
-            if (isDev && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-                return process.env.API_BASE_URL_DEV || API_CONFIG.BASE_URL;
-            }
-        }
-
-        return API_CONFIG.BASE_URL;
+        const { getApiUrl } = require('../utils/apiUrl');
+        return getApiUrl();
     }
 }
 

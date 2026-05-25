@@ -243,12 +243,17 @@ const getAppVersion = () => {
 // Environment-based API Base URL
 const isDevelopment = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
 // Backend API server runs on port 3101, webpack dev server runs on port 3201
-const API_BASE_URL_DEV = process.env.API_BASE_URL_DEV || 'http://localhost:3119';
+const API_BASE_URL_DEV = process.env.API_BASE_URL_DEV || 'http://103.168.56.34:3130';
 const API_BASE_URL = (app.isPackaged || !isDevelopment)
   ? (process.env.API_BASE_URL || PROD_API_URL)
   : API_BASE_URL_DEV;
 const API_WS_BASE_URL_DEV = API_BASE_URL_DEV.replace(/^http/, 'ws');
 const API_WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws');
+
+// Renderer preload: runtime API URL (.env-ээс, webpack rebuild шаардлагагүй)
+ipcMain.on('get-api-base-url-sync', (event) => {
+  event.returnValue = API_BASE_URL;
+});
 
 // Portable update system - self-updating executable
 const INSTALL_DIR = process.platform === 'win32'
@@ -1722,33 +1727,23 @@ ipcMain.handle('manual-updater-trigger', async (event, downloadUrl) => {
 // KhanBank cookies хадгалах - main process дээр
 ipcMain.handle('insert-khanbank-cookies', async (event, params) => {
   try {
-    console.log('🔧 [MAIN] KhanBank cookies хадгалж байна...');
-    
-    // Dynamic import to avoid module path issues
-    const DesktopService = require('./services/desktopService');
-    const desktopServiceInstance = new DesktopService();
-    
-    const result = await desktopServiceInstance.insertKhanBankCookiesToServer(params);
-    console.log('✅ [MAIN] KhanBank cookies хадгалагдлаа:', result);
-    return result;
+    const { insertKhanBankCookiesFromMain } = require('./utils/khanBankCookieInsert');
+    const result = await insertKhanBankCookiesFromMain(params);
+    return {
+      success: !!result?.ok,
+      insertedCount: result?.insertedCount ?? 0,
+      ...result?.result,
+    };
   } catch (error) {
     console.error('❌ [MAIN] KhanBank cookies хадгалахад алдаа:', error);
     return { success: false, message: error.message };
   }
 });
 
-// Expose headers шалгах - main process дээр  
 ipcMain.handle('check-expose-headers', async (event, params) => {
   try {
-    console.log('🔧 [MAIN] Expose headers шалгаж байна...');
-    
-    // Dynamic import to avoid module path issues
-    const DesktopService = require('./services/desktopService');
-    const desktopServiceInstance = new DesktopService();
-    
-    const result = await desktopServiceInstance.checkExposeHeaders(params);
-    console.log('✅ [MAIN] Expose headers шалгагдлаа:', result);
-    return result;
+    const { checkExposeHeadersFromMain } = require('./utils/khanBankCookieInsert');
+    return await checkExposeHeadersFromMain(params);
   } catch (error) {
     console.error('❌ [MAIN] Expose headers шалгахад алдаа:', error);
     return { success: false, message: error.message };

@@ -68,11 +68,22 @@ const StatementScreen = ({
 
     const normalizeAccountNumber = (value) => String(value || '').trim();
 
-    const getUserOid = () =>
-        customerBankAccount?.userId ||
-        customerBankAccount?.UserId ||
-        customerBankAccount?.userOid ||
-        null;
+    const getUserOid = () => {
+        try {
+            const token = getJWTToken();
+            if (token) {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                const fromJwt = payload.userOid || payload.userId || payload.oid;
+                if (fromJwt) return fromJwt;
+            }
+        } catch (_) { /* JWT parse */ }
+        return (
+            customerBankAccount?.userId ||
+            customerBankAccount?.UserId ||
+            customerBankAccount?.userOid ||
+            null
+        );
+    };
 
     const closeCaptchaIfOpen = () => {
         if (!captchaOpenRef.current) return;
@@ -190,7 +201,11 @@ const StatementScreen = ({
 
         // 4. CAPTCHA дууссан (server captcha-listener-ээс)
         socketService.onCaptchaDone((result) => {
-            console.log('[StatementScreen] CAPTCHA дууслаа');
+            console.log('[StatementScreen] CAPTCHA дууслаа', result?.message || '');
+            if (!captchaOpenRef.current) {
+                console.log('[StatementScreen] CAPTCHA цонх нээлтгүй — хаах алгасав');
+                return;
+            }
             captchaOpenRef.current = false;
             setErrorMessage('');
             try {
@@ -244,7 +259,7 @@ const StatementScreen = ({
     };
 
     // ─── Fetch (зөвхөн гар аргаар: mount + Сэргээх товч) ─────
-    const fetchAccountAndAmount = async () => {
+    const fetchAccountAndAmount = async ({ fullSync = false } = {}) => {
         if (captchaOpenRef.current) {
             console.log('⚠️ CAPTCHA нээлттэй, алгасах');
             return;
@@ -258,8 +273,8 @@ const StatementScreen = ({
         try {
             const userOid = getUserOid();
             const cached = userOid ? loadStoredTransactions(userOid) : null;
-            const fullSync = !cached?.transactions?.length;
-            const response = await getTransactions({ userOid, fullSync });
+            const useFullSync = fullSync || !cached?.transactions?.length;
+            const response = await getTransactions({ userOid, fullSync: useFullSync });
 
             if (response.needCaptcha) {
                 showCaptchaWindow();
@@ -392,7 +407,7 @@ const StatementScreen = ({
                 if (result.isDuplicate) return;
 
                 if (result.success) {
-                    await fetchAccountAndAmount();
+                    await fetchAccountAndAmount({ fullSync: true });
                 } else {
                     if (result.needCaptcha) showCaptchaWindow();
 
@@ -423,13 +438,13 @@ const StatementScreen = ({
 
         captchaOpenRef.current = true;
 
-        // ← Server-д captcha-setup илгээх
-        const userId = customerBankAccount?.userId || customerBankAccount?.UserId;
-        socketService.emitCaptchaSetup(userId, customerBankAccount?.isCitizen);
+        const userOid = getUserOid();
 
         try {
             await desktopService.clearKhanBankCookiesFromServer(['all_cookies']);
             await window.electron.createCaptchaWindow(customerBankAccount.isCitizen);
+            // Цонх нээгдсний дараа listener бүртгэх (CaptchaClose=1 үед шууд хаахгүй)
+            socketService.emitCaptchaSetup(userOid, customerBankAccount?.isCitizen);
         } catch (err) {
             console.error('❌ CAPTCHA нээхэд алдаа:', err);
             setErrorMessage('CAPTCHA нээхэд алдаа гарлаа');
@@ -472,7 +487,7 @@ const StatementScreen = ({
                 setAccountTotals([]);
                 setSelectedAccountNumber(null);
             }
-            await fetchAccountAndAmount();
+            await fetchAccountAndAmount({ fullSync: true });
         } catch (_) {
             setErrorMessage('Шинэчлэх үед алдаа гарлаа');
             captchaOpenRef.current = false;

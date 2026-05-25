@@ -13,22 +13,23 @@ const txKey = (tx) => {
     return `${bankId}|${tx?.amount}|${tx?.from}|${tx?.date}|${tx?.accountNumber}`;
 };
 
-/** "2026-05-19 18:26:03" → ms (local parse) */
+/** "2026-05-19 18:26:03" → ms (Улаанбаатарын ханш цаг, timezone шилжүүлэхгүй) */
 const parseTxDateMs = (value) => {
     if (!value) return null;
     const s = String(value).trim();
     const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
     if (m) {
-        return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+        return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 8, +m[5], +m[6]);
     }
     const d = new Date(s);
     return Number.isNaN(d.getTime()) ? null : d.getTime();
 };
 
 const formatTxDate = (ms) => {
-    const d = new Date(ms);
     const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    const ubMs = ms + 8 * 60 * 60 * 1000;
+    const d = new Date(ubMs);
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 };
 
 const storageKey = (userOid) => `${STORAGE_PREFIX}${String(userOid || '').trim()}`;
