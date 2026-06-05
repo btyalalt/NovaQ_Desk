@@ -1,5 +1,8 @@
 const { app, BrowserWindow, ipcMain, session } = require('electron');
 
+// CAPTCHA: navigator.webdriver=false (Chromium engine түвшинд)
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+
 // Windows 7 compatibility command line switches
 if (process.platform === 'win32') {
   const os = require('os');

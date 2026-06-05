@@ -3,19 +3,22 @@
 // main.js → create-captcha-window | StatementScreen → socket captcha-setup
 // Cookie insert: cookie-collector → khanBankCookieInsert (main only)
 // ============================================================
+const path = require('path');
 const { BrowserWindow, session } = require('electron');
 const WindowsCompatibility = require('../utils/windows7Compat');
 const CookieCollector = require('../socket/cookie-collector');
+
+const CAPTCHA_PRELOAD_PATH = path.join(__dirname, 'captcha-chrome-shim.preload.js');
 
 /** app.whenReady()-ээс өмнө session.fromPartition() дуудахгүй (exe эхлэхгүй болно) */
 let captchaSession = null;
 let captchaSessionCspHooked = false;
 
-function getCaptchaSession() {
+function getCaptchaSession(stripCsp) {
     if (!captchaSession) {
         captchaSession = session.fromPartition('persist:novaq-khan-captcha');
     }
-    if (!captchaSessionCspHooked) {
+    if (stripCsp && !captchaSessionCspHooked) {
         captchaSessionCspHooked = true;
         captchaSession.webRequest.onHeadersReceived((details, callback) => {
             const headers = { ...details.responseHeaders };
@@ -67,7 +70,7 @@ class CaptchaManager {
 
             await this.close();
 
-            const captchaSes = getCaptchaSession();
+            const captchaSes = getCaptchaSession(winCompat.isLegacyWindows);
 
             const captchaUrl =
                 isCitizen === 1
@@ -75,8 +78,8 @@ class CaptchaManager {
                     : 'https://corp.khanbank.com/auth/login';
 
             this.window = new BrowserWindow({
-                width: 900,
-                height: 650,
+                width: 1200,
+                height: 800,
                 x: 100,
                 y: 100,
                 parent: mainWindow || undefined,
@@ -88,9 +91,8 @@ class CaptchaManager {
                 resizable: true,
                 ...winCompat.getCompatibleWindowOptions(),
                 webPreferences: {
-                    ...winCompat.getCompatibleWebPreferences(),
+                    ...winCompat.getCaptchaWebPreferences(CAPTCHA_PRELOAD_PATH),
                     session: captchaSes,
-                    webSecurity: false,
                 },
             });
 

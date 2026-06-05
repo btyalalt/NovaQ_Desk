@@ -36,6 +36,40 @@ class WindowsCompatibility {
     }
 
     /**
+     * CAPTCHA цонхны webPreferences — main app-аас тусдаа, Chrome шиг fingerprint.
+     * Electron 11: preload shim page-тай нэг world-д ажиллахын тулд contextIsolation: false.
+     */
+    getCaptchaWebPreferences(preloadPath) {
+        const base = {
+            preload: preloadPath,
+            contextIsolation: false,
+            nodeIntegration: false,
+            sandbox: false,
+            enableRemoteModule: false,
+        };
+
+        if (this.isLegacyWindows) {
+            return {
+                ...base,
+                webSecurity: false,
+                experimentalFeatures: false,
+                backgroundThrottling: false,
+                webgl: false,
+                allowRunningInsecureContent: true,
+            };
+        }
+
+        return {
+            ...base,
+            webSecurity: true,
+            experimentalFeatures: true,
+            backgroundThrottling: true,
+            webgl: true,
+            allowRunningInsecureContent: false,
+        };
+    }
+
+    /**
      * Get Windows compatible web preferences
      */
     getCompatibleWebPreferences() {
