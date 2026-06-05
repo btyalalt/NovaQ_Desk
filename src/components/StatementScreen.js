@@ -45,6 +45,7 @@ const StatementScreen = ({
     const [tokenResult, setTokenResult] = useState(null);
     const [showAmount, setShowAmount] = useState(false);
     const [showAccountList, setShowAccountList] = useState(false);
+    const [headerCollapsed, setHeaderCollapsed] = useState(false);
 
     const fetchingRef = useRef(false);
     const captchaOpenRef = useRef(false);
@@ -654,17 +655,68 @@ const StatementScreen = ({
         setShowAmount(false);
     };
 
+    const handleResizeMouseDown = (corner) => (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!window.electron?.invoke) return;
+
+        const startX = event.screenX;
+        const startY = event.screenY;
+        window.electron.invoke('window-resize-start', { screenX: startX, screenY: startY, corner });
+
+        const onMouseMove = (moveEvent) => {
+            window.electron.invoke('window-resize', {
+                screenX: moveEvent.screenX,
+                screenY: moveEvent.screenY,
+            });
+        };
+
+        const onMouseUp = () => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            window.electron.invoke('window-resize-end');
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    };
+
     return (
         <>
             <div className={`mobile-container ${theme}`} data-theme={theme}>
                 {/* Header */}
-                <div className="mobile-header">
-                    <div className="control-buttons">
+                <div className={`mobile-header ${headerCollapsed ? 'collapsed' : ''}`}>
+                    <div className="header-top-bar">
+                        <div className="user-greeting">
+                            <div className={`status-indicator ${socketConnected ? 'connected' : 'disconnected'}`}>
+                                <span className="status-dot"></span>
+                            </div>
+                            <span className="greeting-text">Сайн уу?</span>
+                        </div>
                         <div className="right-buttons">
               <span className="back-button" onClick={handleBack}>
                 <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <circle cx="9" cy="9" r="9" fill="white" fillOpacity="0.15" />
                   <path d="M12 9H6M6 9L9 6M6 9L9 12" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+                            <span
+                                className="header-toggle-button"
+                                onClick={() => {
+                                    setHeaderCollapsed((prev) => {
+                                        if (!prev) setShowAccountList(false);
+                                        return !prev;
+                                    });
+                                }}
+                                title={headerCollapsed ? 'Дэлгэх' : 'Хураах'}
+                            >
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="9" cy="9" r="9" fill="white" fillOpacity="0.15" />
+                  {headerCollapsed ? (
+                      <path d="M9 6V12M9 12L6 9M9 12L12 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  ) : (
+                      <path d="M9 12V6M9 6L6 9M9 6L12 9" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  )}
                 </svg>
               </span>
                             <span className="control-button" onClick={handleQuitApp}>
@@ -675,22 +727,17 @@ const StatementScreen = ({
               </span>
                         </div>
                     </div>
-                    <div>
-                        <div className="user-greeting">
-                            <div className={`status-indicator ${socketConnected ? 'connected' : 'disconnected'}`}>
-                                <span className="status-dot"></span>
-                            </div>
-                            <span className="greeting-text">Сайн уу?</span>
-                        </div>
+                    {!headerCollapsed && (
                         <div className="name-greeting">
                             <span className="greeting-name">{firstName}</span>{' '}
                             <span className="greeting-lastname">{lastName}</span><br />
                         </div>
-                    </div>
-                    <div className="title">Дансны орлого</div>
+                    )}
+                    {!headerCollapsed && <div className="title">Дансны орлого</div>}
                 </div>
 
                 {/* Account box */}
+                {!headerCollapsed && (
                 <div className="account-dropdown-wrapper" ref={accountDropdownRef}>
                     <div className="account-box">
                         <span className="account-number">{displayedAccountNumber}</span>
@@ -739,6 +786,7 @@ const StatementScreen = ({
                         </div>
                     )}
                 </div>
+                )}
 
                 <button
                     type="button"
@@ -803,7 +851,8 @@ const StatementScreen = ({
             <div className="footer" style={{
                 position: 'fixed', bottom: 0, left: 0, right: 0,
                 backgroundColor: '#f5f5f5', padding: '10px', textAlign: 'center',
-                borderTop: '1px solid #ddd', zIndex: 1000
+                borderTop: '1px solid #ddd', zIndex: 1000,
+                WebkitAppRegion: 'drag'
             }}>
                 {`@bto softline llc ${process.env.APP_VERSION}`}
                 {customer && (() => {
@@ -815,6 +864,27 @@ const StatementScreen = ({
                     return <ContractInfoDisplay customer={customer} />;
                 })()}
             </div>
+
+            <div
+                className="window-resize-handle right-edge"
+                onMouseDown={handleResizeMouseDown('right')}
+                title="Өргөн өөрчлөх"
+            />
+            <div
+                className="window-resize-handle bottom-edge"
+                onMouseDown={handleResizeMouseDown('bottom')}
+                title="Өндөр өөрчлөх"
+            />
+            <div
+                className="window-resize-handle bottom-left"
+                onMouseDown={handleResizeMouseDown('bottom-left')}
+                title="Хэмжээ өөрчлөх"
+            />
+            <div
+                className="window-resize-handle bottom-right"
+                onMouseDown={handleResizeMouseDown('bottom-right')}
+                title="Хэмжээ өөрчлөх"
+            />
         </>
     );
 };

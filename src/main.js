@@ -1214,6 +1214,9 @@ console.log('🔑 [MAIN] App эхлэх үед auth token тохируулагд
 
 let mainWindow;
 let blurTimeOut;
+const WINDOW_MIN_WIDTH = 200;
+const WINDOW_MIN_HEIGHT = 300;
+
 function createWindow() {
    const preloadPath = app.isPackaged
   ? path.join(__dirname, 'preload.js')  // prod: app.asar/src -> preload.js
@@ -1245,6 +1248,7 @@ function createWindow() {
     titleBarStyle: 'default',
   });
   mainWindow.setAlwaysOnTop(true, "screen-saver");
+  mainWindow.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT);
 
   // Track load attempts for fallback
   let loadAttempted = false;
@@ -2332,6 +2336,73 @@ ipcMain.handle('test-download', async () => {
 });
 
 // Window control handlers
+let windowResizeState = null;
+
+ipcMain.handle('window-resize-start', async (event, { screenX, screenY, corner }) => {
+  if (!mainWindow) return { success: false };
+  const bounds = mainWindow.getBounds();
+  windowResizeState = {
+    startMouseX: screenX,
+    startMouseY: screenY,
+    startWidth: bounds.width,
+    startHeight: bounds.height,
+    startWindowX: bounds.x,
+    startWindowY: bounds.y,
+    corner: corner || 'bottom-right',
+  };
+  return { success: true };
+});
+
+ipcMain.handle('window-resize', async (event, { screenX, screenY }) => {
+  if (!mainWindow || !windowResizeState) return { success: false };
+  const deltaX = screenX - windowResizeState.startMouseX;
+  const deltaY = screenY - windowResizeState.startMouseY;
+
+  if (windowResizeState.corner === 'bottom-left') {
+    let newWidth = windowResizeState.startWidth - deltaX;
+    let newHeight = windowResizeState.startHeight + deltaY;
+    let newX = windowResizeState.startWindowX + deltaX;
+
+    if (newWidth < WINDOW_MIN_WIDTH) {
+      newX = windowResizeState.startWindowX + windowResizeState.startWidth - WINDOW_MIN_WIDTH;
+      newWidth = WINDOW_MIN_WIDTH;
+    }
+    if (newHeight < WINDOW_MIN_HEIGHT) {
+      newHeight = WINDOW_MIN_HEIGHT;
+    }
+
+    mainWindow.setBounds({
+      x: Math.round(newX),
+      y: windowResizeState.startWindowY,
+      width: Math.round(newWidth),
+      height: Math.round(newHeight),
+    });
+    return { success: true };
+  }
+
+  if (windowResizeState.corner === 'right') {
+    const newWidth = Math.max(WINDOW_MIN_WIDTH, windowResizeState.startWidth + deltaX);
+    mainWindow.setSize(newWidth, windowResizeState.startHeight);
+    return { success: true };
+  }
+
+  if (windowResizeState.corner === 'bottom') {
+    const newHeight = Math.max(WINDOW_MIN_HEIGHT, windowResizeState.startHeight + deltaY);
+    mainWindow.setSize(windowResizeState.startWidth, newHeight);
+    return { success: true };
+  }
+
+  const newWidth = Math.max(WINDOW_MIN_WIDTH, windowResizeState.startWidth + deltaX);
+  const newHeight = Math.max(WINDOW_MIN_HEIGHT, windowResizeState.startHeight + deltaY);
+  mainWindow.setSize(newWidth, newHeight);
+  return { success: true };
+});
+
+ipcMain.handle('window-resize-end', async () => {
+  windowResizeState = null;
+  return { success: true };
+});
+
 ipcMain.handle('minimize-window', async () => {
   if (mainWindow) {
     mainWindow.minimize();
