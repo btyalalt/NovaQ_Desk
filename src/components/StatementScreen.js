@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import './StatementScreen.css';
-import {getJWTToken, getTokenAndStore, getTransactions} from '../services/apiService';
+import {getContractEndAmount, getJWTToken, getTokenAndStore, getTransactions} from '../services/apiService';
 import DesktopService from '../services/desktopService';
 import authService from '../services/authService';
 import socketService from '../services/socketService';
@@ -848,12 +848,7 @@ const StatementScreen = ({
                 </div>
             </div>
 
-            <div className="footer" style={{
-                position: 'fixed', bottom: 0, left: 0, right: 0,
-                backgroundColor: '#f5f5f5', padding: '10px', textAlign: 'center',
-                borderTop: '1px solid #ddd', zIndex: 1000,
-                WebkitAppRegion: 'drag'
-            }}>
+            <div className="footer">
                 {`@bto softline llc ${process.env.APP_VERSION}`}
                 {customer && (() => {
                     const today = new Date();
@@ -892,6 +887,24 @@ const StatementScreen = ({
 // ─── Contract Info Display ───────────────────────────────────
 
 const ContractInfoDisplay = ({ customer }) => {
+    const [paymentInfo, setPaymentInfo] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadPaymentInfo = async () => {
+            const result = await getContractEndAmount();
+            if (!cancelled && result?.success && result.data) {
+                setPaymentInfo(result.data);
+            }
+        };
+
+        loadPaymentInfo();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     const today = new Date();
     const endDate = customer.contractEndDate ? new Date(customer.contractEndDate) : null;
     const diffTime = endDate ? endDate - today : 0;
@@ -908,6 +921,9 @@ const ContractInfoDisplay = ({ customer }) => {
     };
 
     const { color, message, icon } = getContractStatus(daysLeft);
+    const contractAmount = paymentInfo?.contractAmount ?? customer?.contractAmount ?? null;
+    const bankAccountNum = paymentInfo?.bankAccountNum || null;
+    const bankName = paymentInfo?.bank || null;
 
     return (
         <div style={{
@@ -915,7 +931,22 @@ const ContractInfoDisplay = ({ customer }) => {
             color, borderRadius: '6px', fontSize: '12px', fontWeight: '600',
             textAlign: 'center', border: `1px solid ${color}20`
         }}>
-            {icon} {message}
+            <div>{icon} {message}</div>
+            {contractAmount != null && (
+                <div style={{ marginTop: '6px' }}>
+                    Төлбөр: {Number(contractAmount).toLocaleString('mn-MN')} ₮
+                </div>
+            )}
+            {bankAccountNum && (
+                <div style={{ marginTop: '4px' }}>
+                    Данс: {bankAccountNum}
+                </div>
+            )}
+            {bankName && (
+                <div style={{ marginTop: '4px' }}>
+                    Банк: {bankName}
+                </div>
+            )}
         </div>
     );
 };

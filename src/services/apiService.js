@@ -431,7 +431,46 @@ const getSysConfigurations = async () => {
   }
 };
 
+const getContractEndAmount = async () => {
+  try {
+    const jwtToken = getJWTToken();
+    if (!jwtToken) {
+      return { success: false, errorMessage: 'JWT token олдсонгүй', needLogin: true };
+    }
+
+    const apiBaseUrl = getApiUrl();
+    const fetchFn = getFetch();
+    const response = await fetchFn(`${apiBaseUrl}/api/data/contract-end-amount`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${jwtToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        return {
+          success: false,
+          errorMessage: 'JWT token дууссан, дахин login хийх хэрэгтэй',
+          needLogin: true,
+        };
+      }
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('❌ Error getting contract end amount:', error);
+    return {
+      success: false,
+      errorMessage: error.message,
+      data: null,
+    };
+  }
+};
+
 module.exports = {
   getTransactions, clearJWTToken, getJWTToken, saveJWTToken, getJWTTokenFromServer, getTokenAndStore,
-  getSysConfigurations
+  getSysConfigurations, getContractEndAmount,
 };
