@@ -95,6 +95,25 @@ const getJWTTokenFromServer = async (username, password) => {
   }
 };
 
+const formatBankErrorDetail = (bankResponse) => {
+  if (!bankResponse) return '';
+  const parts = [];
+  if (bankResponse.errorCode) parts.push(bankResponse.errorCode);
+  if (bankResponse.bankMessage) parts.push(bankResponse.bankMessage);
+  if (bankResponse.statusCode) parts.push(`HTTP ${bankResponse.statusCode}`);
+  return parts.join(' : ');
+};
+
+const buildTokenErrorResult = (code, message, bankResponse, extra = {}) => ({
+  success: false,
+  code,
+  errorMessage: message,
+  bankResponse,
+  bankError: code === 'BANK_ERROR' || code === 'CONNECTION_ERROR',
+  bankErrorDetail: formatBankErrorDetail(bankResponse),
+  ...extra,
+});
+
 // Get token and store
 // Track if getTokenAndStore is currently running to prevent duplicate calls
 let getTokenAndStoreRunning = false;
@@ -220,19 +239,25 @@ const getTokenAndStore = async (userOid) => {
                     };
 
                 case 'CONNECTION_ERROR':
-                    return {
-                        success: false,
-                        errorMessage: message || 'Сүлжээний холболтын алдаа',
+                    return buildTokenErrorResult(
+                        'CONNECTION_ERROR',
+                        message || 'Сүлжээний холболтын алдаа',
                         bankResponse,
-                    };
+                    );
 
                 case 'BANK_ERROR':
-                default:
-                    return {
-                        success: false,
-                        errorMessage: message || 'Банкны серверийн алдаа',
+                    return buildTokenErrorResult(
+                        'BANK_ERROR',
+                        message || 'Банкны серверийн алдаа',
                         bankResponse,
-                    };
+                    );
+
+                default:
+                    return buildTokenErrorResult(
+                        code || 'BANK_ERROR',
+                        message || 'Банкны серверийн алдаа',
+                        bankResponse,
+                    );
             }
         }
 
@@ -253,9 +278,20 @@ const getTokenAndStore = async (userOid) => {
             };
         }
 
+        const fallbackBankResponse = tokenData.data?.bankResponse;
+        const fallbackCode = tokenData.data?.code;
+        if (fallbackCode === 'BANK_ERROR' || fallbackCode === 'CONNECTION_ERROR' || tokenRes.status === 502) {
+            return buildTokenErrorResult(
+                fallbackCode || 'BANK_ERROR',
+                tokenData.data?.message || tokenData.message || `Token API алдаа: ${tokenRes.status}`,
+                fallbackBankResponse,
+            );
+        }
+
         return {
             success: false,
-            errorMessage: tokenData.message || `Token API алдаа: ${tokenRes.status}`,
+            errorMessage: tokenData.data?.message || tokenData.message || `Token API алдаа: ${tokenRes.status}`,
+            bankResponse: fallbackBankResponse,
         };
 
     } catch (error) {

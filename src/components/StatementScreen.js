@@ -344,20 +344,43 @@ const StatementScreen = ({
             }
 
             switch (data.code) {
-                case 'OK':
-                    // CAPTCHA цонхыг зөвхөн onCaptchaDone (CaptchaClose 0→1) дээр хаана
+                case 'OK': {
+                    const groupedBanks = Array.isArray(data.transactions) &&
+                        data.transactions.some(
+                            (item) => item && typeof item === 'object' && 'code' in item && Array.isArray(item.transactions),
+                        )
+                        ? data.transactions
+                        : [];
+                    const failedBank = groupedBanks.find(
+                        (bank) =>
+                            bank &&
+                            !bank.success &&
+                            (bank.code === 'BANK_ERROR' || bank.code === 'CONNECTION_ERROR'),
+                    );
+
                     if (!captchaOpenRef.current) {
-                        setErrorMessage('');
-                        setErrorMessageBank('');
+                        if (failedBank) {
+                            setErrorMessage(failedBank.message || 'Банкны серверийн алдаа');
+                            setBankResponseError(failedBank.bankResponse);
+                        } else {
+                            setErrorMessage('');
+                            setErrorMessageBank('');
+                        }
                     }
+
+                    const flatTransactions = groupedBanks.length
+                        ? groupedBanks.flatMap((bank) => (Array.isArray(bank?.transactions) ? bank.transactions : []))
+                        : (data.transactions || []);
+
                     if (userOid) {
-                        applyMergedTransactions(userOid, data.transactions || []);
-                    } else if (data.transactions) {
-                        setTransactions(data.transactions);
-                        setTotalAmount(calculateTotalAmount(data.transactions));
+                        applyMergedTransactions(userOid, flatTransactions);
+                    } else if (flatTransactions.length) {
+                        setTransactions(flatTransactions);
+                        setTotalAmount(calculateTotalAmount(flatTransactions));
                         hydrateAccountTotals(data);
                     }
                     break;
+                }
 
                 case 'CAPTCHA_PENDING':
                     setErrorMessage(data.message || 'CAPTCHA шаардлагатай');
@@ -435,8 +458,12 @@ const StatementScreen = ({
 
 // ─── Helper: bankResponse-г errorMessageBank-д тохируулах ───
 
-    const setBankResponseError = (bankResponse) => {
-        if (bankResponse && (bankResponse.errorCode || bankResponse.bankMessage)) {
+    const setBankResponseError = (bankResponse, bankErrorDetail) => {
+        if (bankErrorDetail) {
+            setErrorMessageBank(bankErrorDetail);
+            return;
+        }
+        if (bankResponse && (bankResponse.errorCode || bankResponse.bankMessage || bankResponse.statusCode)) {
             const parts = [];
             if (bankResponse.errorCode) parts.push(bankResponse.errorCode);
             if (bankResponse.bankMessage) parts.push(bankResponse.bankMessage);
@@ -447,6 +474,11 @@ const StatementScreen = ({
         }
     };
 
+    const applyTokenErrorToScreen = (result) => {
+        setErrorMessage(result?.errorMessage || 'Token авахад алдаа гарлаа');
+        setBankResponseError(result?.bankResponse, result?.bankErrorDetail);
+    };
+
     // ─── Token refresh ─────────────────────────────────────────
 
     const tokenRefresh = async () => {
@@ -454,6 +486,7 @@ const StatementScreen = ({
 
         setLoading(true);
         setErrorMessage('');
+        setErrorMessageBank('');
 
         try {
             if (customerBankAccount?.bankUserName && customerBankAccount?.bankPassword) {
@@ -466,16 +499,13 @@ const StatementScreen = ({
 
                 if (result.success) {
                     await fetchAccountAndAmount({ fullSync: true });
+                } else if (result.bankError) {
+                    applyTokenErrorToScreen(result);
                 } else {
                     if (result.needCaptcha && !captchaOpenRef.current) {
                         showCaptchaWindow();
                     }
-
-
-                    setErrorMessage(result.errorMessage || 'Token авахад алдаа гарлаа');
-                    if(result.bankResponse){
-                        setErrorMessageBank(result.bankResponse.errorCode + ' : ' + result.bankResponse.bankMessage)
-                    }
+                    applyTokenErrorToScreen(result);
                 }
             } else if (!captchaOpenRef.current) {
                 showCaptchaWindow();
