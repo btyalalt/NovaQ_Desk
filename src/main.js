@@ -3,11 +3,26 @@ const { app, BrowserWindow, ipcMain, session } = require('electron');
 // CAPTCHA: navigator.webdriver=false (Chromium engine түвшинд)
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 
-// Windows 7 compatibility command line switches
+// Windows compatibility command line switches (Win7 | Win10 | Win11)
 if (process.platform === 'win32') {
   const os = require('os');
-  const isWindows7 = os.release().startsWith('6.1');
-  
+  const release = os.release() || '';
+  const build = parseInt(String(release.split('.')[2] || '0'), 10);
+  const isWindows7 = release.startsWith('6.1');
+  const isWindows8 = release.startsWith('6.2') || release.startsWith('6.3');
+  const isWindows11 = build >= 22000;
+  const isWindows10 = release.startsWith('10.0') && !isWindows11;
+  const isModernWindows = isWindows10 || isWindows11;
+
+  // Win8/10/11: background render throttle унтраах (Win7 өөрийн блокдоо ижил switch-тэй)
+  if (!isWindows7) {
+    const winLabel = isWindows11 ? '11' : isWindows10 ? '10' : isWindows8 ? '8' : '10+';
+    console.log(`🔧 Windows ${winLabel} detected - CAPTCHA render switches`);
+    app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+    app.commandLine.appendSwitch('disable-renderer-backgrounding');
+    app.commandLine.appendSwitch('disable-background-timer-throttling');
+  }
+
   if (isWindows7) {
     console.log('🔧 Windows 7 detected - applying compatibility switches');
     

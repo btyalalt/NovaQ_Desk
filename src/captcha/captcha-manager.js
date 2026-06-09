@@ -33,13 +33,6 @@ const { setCaptchaLogRenderer, captchaLog } = require('../utils/captchaDebugLog'
 
 const winCompat = new WindowsCompatibility();
 
-/** Win7-ээс бусад: шууд Khan login ачаална (3s loadDelay байхгүй) */
-function getCaptchaOpenDelayMs() {
-    if (winCompat.isWindows7) return 8000;
-    if (winCompat.isLegacyWindows) return 1500;
-    return 0;
-}
-
 class CaptchaManager {
     constructor() {
         this.window = null;
@@ -70,7 +63,8 @@ class CaptchaManager {
 
             await this.close();
 
-            const captchaSes = getCaptchaSession(winCompat.isLegacyWindows);
+            // CSP — бүх Windows (Win10/11 SPA цагаан дэлгэц гарахгүйн тулд)
+            const captchaSes = getCaptchaSession(true);
 
             const captchaUrl =
                 isCitizen === 1
@@ -96,15 +90,20 @@ class CaptchaManager {
                 },
             });
 
-            this.window.webContents.setUserAgent(winCompat.getCompatibleUserAgent());
-            captchaSes.setUserAgent(winCompat.getCompatibleUserAgent());
+            const chromeUa = winCompat.getCompatibleUserAgent();
+            this.window.webContents.setUserAgent(chromeUa);
+            captchaSes.setUserAgent(chromeUa);
             winCompat.applySessionFixes(captchaSes);
+            winCompat.applyCaptchaChromeHeaders(captchaSes);
             winCompat.setupWindowsEventListeners(this.window);
             winCompat.setupBlankPageRecovery(this.window, captchaLog);
 
             captchaLog('info', 'MANAGER', 'OS', {
                 windows: winCompat.windowsVersion,
-                legacy: winCompat.isLegacyWindows,
+                win7: winCompat.isWindows7,
+                win10: winCompat.isWindows10,
+                win11: winCompat.isWindows11,
+                openDelayMs: winCompat.getCaptchaOpenDelayMs(),
                 chrome: process.versions?.chrome,
             });
 
@@ -134,7 +133,7 @@ class CaptchaManager {
                 this.cookieCollector.install();
             };
 
-            const openDelay = getCaptchaOpenDelayMs();
+            const openDelay = winCompat.getCaptchaOpenDelayMs();
             const runLoad = async () => {
                 if (!this.window || this.window.isDestroyed()) return;
                 try {

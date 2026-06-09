@@ -11,28 +11,75 @@ class WindowsCompatibility {
     constructor() {
         this.windowsVersion = this.detectWindowsVersion();
         this.isWindows7 = this.windowsVersion === '7';
-        this.isLegacyWindows = this.windowsVersion === '7' || this.windowsVersion === '8';
+        this.isWindows8 = this.windowsVersion === '8';
+        this.isWindows10 = this.windowsVersion === '10';
+        this.isWindows11 = this.windowsVersion === '11';
+        this.isLegacyWindows = this.isWindows7 || this.isWindows8;
+        this.isModernWindows = this.isWindows10 || this.isWindows11;
         this.retryCount = 0;
         this.maxRetries = 3;
     }
 
     /**
-     * Detect Windows version
+     * Win7=6.1 | Win8=6.2/6.3 | Win10=10.0 build<22000 | Win11=10.0 build>=22000
+     * (Win11 kernel нь 10.0 гэж буцаадаг тул build-ээр ялгана)
      */
     detectWindowsVersion() {
         if (process.platform !== 'win32') return null;
-        
+
         try {
-            const systemVersion = process.getSystemVersion();
-            if (systemVersion.startsWith('6.1')) return '7';
-            if (systemVersion.startsWith('6.2') || systemVersion.startsWith('6.3')) return '8';
-            if (systemVersion.startsWith('10.0')) return '10';
+            const os = require('os');
+            const release = os.release() || '';
+            const systemVersion = process.getSystemVersion() || release;
+            const build = parseInt(String(release.split('.')[2] || '0'), 10);
+
+            if (systemVersion.startsWith('6.1') || release.startsWith('6.1')) return '7';
+            if (
+                systemVersion.startsWith('6.2') ||
+                systemVersion.startsWith('6.3') ||
+                release.startsWith('6.2') ||
+                release.startsWith('6.3')
+            ) {
+                return '8';
+            }
             if (systemVersion.startsWith('11.0')) return '11';
+            if (build >= 22000) return '11';
+            if (systemVersion.startsWith('10.0') || release.startsWith('10.0')) return '10';
             return 'unknown';
         } catch (error) {
             console.warn('⚠️ Could not detect Windows version:', error);
             return 'unknown';
         }
+    }
+
+    /** CAPTCHA цонх нээхээс өмнөх хүлээлт (ms) */
+    getCaptchaOpenDelayMs() {
+        switch (this.windowsVersion) {
+            case '7': return 8000;
+            case '8': return 1500;
+            case '10': return 500;
+            case '11': return 400;
+            default: return 500;
+        }
+    }
+
+    /** Хоосон хуудас шалгах хугацаа (ms) — SPA ачаалахад OS бүр өөр */
+    getCaptchaBlankCheckDelaysMs() {
+        switch (this.windowsVersion) {
+            case '7': return [2500, 5000, 9000];
+            case '8': return [2000, 4500, 8000];
+            case '10': return [2000, 4500, 8000];
+            case '11': return [1500, 4000, 7000];
+            default: return [2000, 4500, 8000];
+        }
+    }
+
+    /** URL ачаалах retry тоо */
+    getCaptchaLoadMaxRetries() {
+        if (this.isWindows7) return 3;
+        if (this.isWindows8) return 3;
+        if (this.isModernWindows) return 2;
+        return 2;
     }
 
     /**
@@ -63,7 +110,7 @@ class WindowsCompatibility {
             ...base,
             webSecurity: true,
             experimentalFeatures: true,
-            backgroundThrottling: true,
+            backgroundThrottling: false,
             webgl: true,
             allowRunningInsecureContent: false,
         };
@@ -172,23 +219,20 @@ class WindowsCompatibility {
     /**
      * Enhanced loading with Windows retry mechanism
      */
-    async loadURLWithRetry(webContents, url, maxRetries = 3) {
-        if (!this.isLegacyWindows) {
-            return await webContents.loadURL(url);
-        }
-
+    async loadURLWithRetry(webContents, url, maxRetries = this.getCaptchaLoadMaxRetries()) {
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 console.log(`🔍 Windows ${this.windowsVersion} CAPTCHA load attempt ${attempt}/${maxRetries}: ${url}`);
                 
-                // Add delay for legacy Windows
                 if (attempt > 1) {
-                    const delay = this.isWindows7 ? 3000 * attempt : 2000 * attempt;
+                    let delay;
+                    if (this.isWindows7) delay = 3000 * attempt;
+                    else if (this.isWindows8) delay = 2000 * attempt;
+                    else delay = 1200 * attempt;
                     console.log(`⏰ Waiting ${delay}ms before retry...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
 
-                // Windows 7 specific: Clear any existing content first
                 if (this.isWindows7 && attempt > 1) {
                     try {
                         await webContents.executeJavaScript('document.body.innerHTML = "";');
@@ -294,7 +338,7 @@ class WindowsCompatibility {
             setTimeout(() => {
                 try {
                     if (!window.isDestroyed()) {
-                        window.webContents.loadURL(validatedURL || url);
+                        window.webContents.loadURL(url);
                     }
                 } catch (error) {
                     console.error(`❌ Windows ${this.windowsVersion} retry failed:`, error);
@@ -315,6 +359,35 @@ class WindowsCompatibility {
             cache: true,
             partition: 'persist:captcha-session'
         };
+    }
+
+    /**
+     * CAPTCHA session HTTP header — Chrome 87 navigation шиг (Electron UA leak засах)
+     */
+    applyCaptchaChromeHeaders(targetSession) {
+        if (!targetSession?.webRequest) return;
+
+        const ua = this.getCompatibleUserAgent();
+        const filter = {
+            urls: [
+                '*://*.khanbank.com/*',
+                '*://api.khanbank.com/*',
+            ],
+        };
+
+        targetSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+            const headers = { ...details.requestHeaders };
+            headers['User-Agent'] = ua;
+            headers['Accept-Language'] = 'mn-MN,mn;q=0.9,en-US;q=0.8,en;q=0.7';
+
+            const resourceType = details.resourceType;
+            if (resourceType === 'mainFrame' || resourceType === 'subFrame') {
+                headers.Accept =
+                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9';
+            }
+
+            callback({ requestHeaders: headers });
+        });
     }
 
     /**
@@ -407,7 +480,9 @@ class WindowsCompatibility {
         if (!window?.webContents) return;
 
         let blankRecoverAttempts = 0;
-        const MAX_BLANK_RECOVER = 2;
+        const MAX_BLANK_RECOVER = 3;
+        const CHECK_DELAYS_MS = this.getCaptchaBlankCheckDelaysMs();
+        let scheduledForNav = 0;
 
         const checkBlank = async () => {
             if (window.isDestroyed()) return;
@@ -416,38 +491,58 @@ class WindowsCompatibility {
                     ready: document.readyState,
                     bodyLen: (document.body && document.body.innerText) ? document.body.innerText.trim().length : 0,
                     childCount: document.body ? document.body.children.length : 0,
-                    url: location.href
+                    rootEmpty: (() => {
+                        const root = document.querySelector('#root, #app, [data-reactroot]');
+                        return !!(root && !root.innerHTML.trim());
+                    })(),
+                    url: location.href,
+                    title: document.title || ''
                 })`, true);
 
                 const isLoginHost =
                     /khanbank\\.com/i.test(info.url || '') &&
                     !String(info.url || '').startsWith('about:');
                 const looksBlank =
-                    isLoginHost && info.bodyLen < 30 && info.childCount < 4;
+                    isLoginHost &&
+                    ((info.bodyLen < 30 && info.childCount < 4) || info.rootEmpty);
 
-                if (looksBlank && blankRecoverAttempts < MAX_BLANK_RECOVER) {
-                    blankRecoverAttempts += 1;
-                    logFn(
-                        'warn',
-                        'COMPAT',
-                        'хоосон хуудас — reload',
-                        { attempt: blankRecoverAttempts, ...info, os: this.windowsVersion }
-                    );
-                    window.webContents.reload();
+                if (!looksBlank || blankRecoverAttempts >= MAX_BLANK_RECOVER) return;
+
+                blankRecoverAttempts += 1;
+                logFn(
+                    'warn',
+                    'COMPAT',
+                    'хоосон хуудас — сэргээх',
+                    { attempt: blankRecoverAttempts, ...info, os: this.windowsVersion }
+                );
+
+                const wc = window.webContents;
+                if (blankRecoverAttempts >= 2) {
+                    try {
+                        await wc.session.clearCache();
+                    } catch (_) { /* */ }
+                    wc.reloadIgnoringCache();
+                } else {
+                    wc.reload();
                 }
             } catch (err) {
                 logFn('warn', 'COMPAT', 'blank check алдаа', { error: err.message });
             }
         };
 
-        const scheduleCheck = () => {
-            const delay = this.isWindows7 ? 2500 : 1500;
-            setTimeout(checkBlank, delay);
+        const scheduleChecks = () => {
+            const navId = ++scheduledForNav;
+            CHECK_DELAYS_MS.forEach((delay) => {
+                setTimeout(() => {
+                    if (navId !== scheduledForNav || window.isDestroyed()) return;
+                    checkBlank();
+                }, delay);
+            });
         };
 
-        window.webContents.on('did-finish-load', scheduleCheck);
-        window.webContents.on('did-navigate-in-page', scheduleCheck);
-        window.webContents.on('did-navigate', scheduleCheck);
+        window.webContents.on('did-finish-load', scheduleChecks);
+        window.webContents.on('did-navigate-in-page', scheduleChecks);
+        window.webContents.on('did-navigate', scheduleChecks);
     }
 }
 
